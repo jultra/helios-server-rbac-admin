@@ -53,7 +53,7 @@ def get_class(datatype):
     dynamic_module = __import__(".".join(parsed_datatype[:-1]), globals(), locals(), [], level=-1)
     
     if not dynamic_module:
-        raise Exception("no module for %s" % datatpye)
+        raise Exception("no module for %s" % datatype)
 
     # go down the attributes to get to the class
     try:
@@ -81,7 +81,12 @@ class LDObjectContainer(object):
 
         return self._ld_object
 
-    def toJSONDict(self, complete=False):
+    def toJSONDict(self, complete=False, update=False):
+        #added by John Ultra
+        #what if the OBJECT changed?
+        if update:
+            if hasattr(self, '_ld_object'): 
+                del self._ld_object
         return self.ld_object.toJSONDict(complete=complete)
 
     def toJSON(self):
@@ -143,6 +148,8 @@ class LDObject(object):
         return return_obj
 
     def _getattr_wrapped(self, attr):
+        if isinstance(self.wrapped_obj, dict):
+            return self.wrapped_obj[attr]
         return getattr(self.wrapped_obj, attr)
 
     def _setattr_wrapped(self, attr, val):

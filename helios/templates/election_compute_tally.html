@@ -15,7 +15,8 @@
     Once you do this, voters will no longer be able to cast a ballot.
 </p>
 
-<form method="post" action="" onsubmit="alert('ok, tally has begun')" class="pretty">
+<!--<form method="post" action="" onsubmit="alert('ok, tally has begun')" class="pretty">-->
+<form method="post" action="" class="pretty">
 <input type="hidden" name="csrf_token" value="{{csrf_token}}" />
     
 <input class="pretty" type="submit" value="compute encrypted tally!" />

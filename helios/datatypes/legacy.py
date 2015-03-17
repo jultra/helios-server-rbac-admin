@@ -17,7 +17,8 @@ class LegacyObject(LDObject):
 class Election(LegacyObject):
     WRAPPED_OBJ_CLASS = models.Election
     FIELDS = ['uuid', 'questions', 'name', 'short_name', 'description', 'voters_hash', 'openreg',
-              'frozen_at', 'public_key', 'cast_url', 'use_voter_aliases', 'voting_starts_at', 'voting_ends_at']
+              'frozen_at', 'public_key', 'cast_url', 'use_voter_aliases', 'voting_starts_at', 'voting_ends_at',
+              'eligibility']
 
     STRUCTURED_FIELDS = {
         'public_key' : 'legacy/EGPublicKey',
@@ -69,7 +70,8 @@ class EncryptedVoteWithRandomness(LegacyObject):
     
 
 class Voter(LegacyObject):
-    FIELDS = ['election_uuid', 'uuid', 'voter_type', 'voter_id_hash', 'name']
+    #FIELDS = ['election_uuid', 'uuid', 'voter_type', 'voter_id_hash', 'name']
+    FIELDS = ['election_uuid', 'uuid', 'alias', 'voter_type', 'voter_login_id', 'voter_name', 'voter_email', 'voter_password']
 
     ALIASED_VOTER_FIELDS = ['election_uuid', 'uuid', 'alias']
 
@@ -199,4 +201,8 @@ class Tally(LegacyObject):
         'tally': arrayOf(arrayOf('legacy/EGCiphertext'))}
 
 class Eligibility(ListObject, LegacyObject):
+    WRAPPED_OBJ = list
+
+#added by John Ultra
+class Data(ListObject, LegacyObject):
     WRAPPED_OBJ = list

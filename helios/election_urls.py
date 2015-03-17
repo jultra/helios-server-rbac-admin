@@ -83,5 +83,45 @@ urlpatterns = patterns('',
     (r'^/ballots/$', ballot_list),
     (r'^/ballots/(?P<voter_uuid>[^/]+)/all$', voter_votes),
     (r'^/ballots/(?P<voter_uuid>[^/]+)/last$', voter_last_vote),
-
+    
+    #added by John Ultra
+    #admin
+    (r'^/admin/view$', one_election_admin),
+    (r'^/admin/officers/list$', one_election_officers_list),
+    (r'^/admin/officer/new$', user_new),
+    (r'^/admin/officer/(?P<officer_id>[^/]+)/edit$', user_edit),
+    (r'^/admin/officer/(?P<officer_id>[^/]+)/delete$', user_delete),
+    
+    (r'^/admin/roles/list$', one_election_roles_list),
+    (r'^/admin/role/new$', role_new),
+    (r'^/admin/role/(?P<role_id>[^/]+)/edit$', role_edit),
+    (r'^/admin/role/(?P<role_id>[^/]+)/delete$', role_delete),
+    
+    (r'^/admin/validation/list$', one_validations_list),
+    (r'^/admin/validation/new/(?P<perm_id>[^/]+)/$', policy_new),
+    (r'^/admin/validation/edit/(?P<val_id>[^/]+)$', policy_edit),
+    (r'^/admin/validation/delete/(?P<val_id>[^/]+)$', policy_delete),
+    (r'^/admin/validation/details/(?P<val_id>[^/]+)$', policy_details),
+    (r'^/admin/validation/requests$', requests_list),
+    (r'^/admin/validation/requests_ballot$', requests_ballot),
+    (r'^/admin/validation/ballot_req_details/(?P<vr_id>[^/]+)$', ballot_req_details),
+    (r'^/admin/validation/requests_voters$', requests_voters),
+    (r'^/admin/validation/voter_req_details/(?P<vr_id>[^/]+)$', voter_req_details),
+    (r'^/admin/validation/requests_trustee$', requests_trustees),
+    (r'^/admin/validation/other_requests$', other_requests),
+    (r'^/admin/validation/request_details/(?P<vr_id>[^/]+)$', request_details),
+    (r'^/admin/validation/approve_request/(?P<vr_id>[^/]+)$', approve_request),
+    (r'^/admin/validation/reject_request/(?P<vr_id>[^/]+)$', reject_request),
+    (r'^/admin/validation/ignore_request/(?P<vr_id>[^/]+)$', ignore_request),
+    
+    (r'^/verify_object/(?P<uuid>[^/]+)$', verify_object_by_uuid),
+    
+    #saving ballot/questions
+    #(r'^/save_questions/(?P<vr_id>[^/]+)$', one_election_save_questions),
+    
+    # any other case!
+    (r'^/(?P<caller>[^/]+)/(?P<vr_id>[^/]+)$', one_election),
+    
+    #test urls
+    (r'^/questions_s$', election_questions),
 )

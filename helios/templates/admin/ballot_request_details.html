@@ -1,0 +1,67 @@
+{% extends TEMPLATE_BASE%}
+
+{% block title %}{{election.name}}{% endblock %}
+{% block content %}
+<h2 class="title">{{election.name}} &mdash; Election Administration <span style="font-size:0.7em;">[<a href="{% url helios.views.one_election_view election.uuid %}">back to election</a>]</span></h2>
+
+<div id="breadcrumb">
+	administration | 
+	validation requests | 
+	ballot | 
+	
+</div>
+
+{% include "info-messages.html" %}
+
+<div id="admin_content">
+{%if v_request %}
+<div id="data_definition">
+	<fieldset>
+		<legend>Ballot Definition</legend>
+			{% for question in v_request.data.input.questions %}
+				{{forloop.counter}} . {{question.question}} ({{question.choice_type}}, select between {{question.min}} and {{question.max}} answers)<br />
+				Answers:
+				<ul>
+				{%for answer in question.answers%}
+					<li>{{answer}}</li>
+				{%endfor%}
+				</ul>
+				<br/>			
+			{% endfor %}
+			
+			
+			<div style="text-align:left; padding-top: 20px;">
+			{% if p_url%}
+				<a href="{{ p_url }}" style="font-size: 1.2em; padding:5px; background: #eee; border: 1px solid #888">preview ballot</a>
+			{% else %}
+				<a href="" style="font-size: 1.2em; padding:5px; background: #eee; border: 1px solid #888">preview ballot</a>
+			{% endif %}
+			</div>
+		
+	</fieldset>
+</div>
+<div id="validation_history">
+	<fieldset>
+		<legend>Validation History</legend>
+			Designed by: {{v_request.election_officer.user.name}} <br />
+			Overall Validation Status: {{v_request.status}} <br />
+			{% for mon in v_history %}
+				({{forloop.counter}}) Validation Entry Description: {{mon.validation_entry.description}} Status: {{mon.status}} Validators: {{mon.validators}}<br />
+			{% endfor %}
+	
+	</fieldset>
+</div>
+
+<div id="voting_buttons">
+	<div style="text-align:left; padding: 20px;">
+		<a onclick="return confirm('Are you sure you want to APPROVE this request?');" href="{% url helios.views.approve_request v_request.election_uuid, v_request.id%}" 
+			style="font-size: 1.2em; padding:5px; background: #eee; border: 1px solid #888">approve</a>
+		<a onclick="return confirm('Are you sure you want to REJECT this request?');" href="{% url helios.views.reject_request v_request.election_uuid, v_request.id%}" 
+			style="font-size: 1.2em; padding:5px; background: #eee; border: 1px solid #888">reject</a>
+		<a onclick="return confirm('Are you sure you want to IGNORE this request?');" href="{%url helios.views.ignore_request v_request.election_uuid, v_request.id%}" 
+			style="font-size: 1.2em; padding:5px; background: #eee; border: 1px solid #888">ignore?</a>
+	</div>
+</div>	
+{%endif%}
+</div>
+{% endblock %}

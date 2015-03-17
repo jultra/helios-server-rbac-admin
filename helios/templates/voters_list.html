@@ -4,6 +4,7 @@
 {% block content %}
   <h2 class="title">{{election.name}} &mdash; Voters and Ballot Tracking Center <span style="font-size:0.7em;">[<a href="{% url helios.views.one_election_view election.uuid %}">back to election</a>]</span></h2>
 
+{% include "info-messages.html" %}
 <p>
 <b>Who can vote?</b>
 {% if election.openreg %}
@@ -109,6 +110,7 @@ Voters {{voters_page.start_index}} - {{voters_page.end_index}} (of {{total_voter
 {% endif %}
 
 <table class="pretty">
+<!--table header-->
 <tr>
 {% if admin_p or not election.use_voter_aliases %}
 <th>Name</th>
@@ -119,6 +121,9 @@ Voters {{voters_page.start_index}} - {{voters_page.end_index}} (of {{total_voter
 {% endif %}
 <th>Smart Ballot Tracker</th>
 </tr>
+<!--end table header-->
+
+<!--populate table with contents-->
 {% for voter in voters %}
 <tr>
 {% if admin_p or not election.use_voter_aliases %}
@@ -127,7 +132,7 @@ Voters {{voters_page.start_index}} - {{voters_page.end_index}} (of {{total_voter
 [<a href="{% url helios.views.voters_email election.uuid %}?voter_id={{voter.voter_login_id}}">email</a>]
 [<a onclick="return confirm('are you sure you want to remove {{voter.name}} ?');" href="{% url helios.views.voter_delete election.uuid, voter.uuid %}">x</a>]
 {% endif %}
-<img border="0" height="20" src="/static/auth/login-icons/{{voter.voter_type}}.png" alt="{{voter.voter_type}}" /> {{voter.name}}</td>
+<img border="0" height="20" src="/static/helios_auth/login-icons/{{voter.voter_type}}.png" alt="{{voter.voter_type}}" /> {{voter.name}}</td>
 {% endif %}
 {% if election.use_voter_aliases %}
 <td>{{voter.alias}}</td>
@@ -141,5 +146,6 @@ Voters {{voters_page.start_index}} - {{voters_page.end_index}} (of {{total_voter
 <br /><br />
 <em>no voters.</em>
 {% endif %}
+<!--table content population ends here!-->
 
 {% endblock %}

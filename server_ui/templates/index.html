@@ -12,7 +12,10 @@
 <div style="font-size:1.4em;" class="highlight-box">
 {{user.display_html_big|safe}}
 </div>
-{% if create_p %}
+<!--modified by John Ultra
+	checks if user has permission to officiate elections
+	-->
+{% if officiate_p %}
 <h4>Administration</h4>
 {% if elections_administered %}
 <ul>
@@ -24,9 +27,15 @@
 <em>none yet</em>
 {% endif %}
 <p>[<a href="{% url helios.views.elections_administered %}">see all</a>]</p>
+
+<!--check modified by John Ultra
+	create_p checks if user has permission to create election
+	-->
+{% if create_p %}
 <div style="text-align:right;">
 <a href="{% url helios.views.election_new %}" style="font-size: 1.2em; padding:5px; background: #eee; border: 1px solid #888">create election &gt;</a>
 </div>
+{%endif%}
 {% endif %}
 
 <h4>Recent Votes</h4>

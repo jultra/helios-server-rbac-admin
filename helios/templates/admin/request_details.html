@@ -1,0 +1,27 @@
+{% extends TEMPLATE_BASE%}
+
+{% block title %}{{election.name}}{% endblock %}
+{% block content %}
+<h2 class="title">{{election.name}} &mdash; Election Administration <span style="font-size:0.7em;">[<a href="{% url helios.views.one_election_view election.uuid %}">back to election</a>]</span></h2>
+
+<div id="breadcrumb">
+	administration | 
+	validation policy | 
+	details | 
+	[<a href="{% url helios.views.other_requests election.uuid %}">back</a>]
+</div>
+
+{% include "info-messages.html" %}
+<div id="admin_content">
+<div id="policy">
+	<fieldset style="padding: 10px 10px 10px 10px; margin: 20px 20px 20px 20px">
+		<legend>Validation Request Processing Details</legend>
+		<span style="font-size: 1.2em"> Action: <b>{{v_request.action|upper}}</b></span> <br />	
+		<span style="font-size: 1.2em"> Requested by: {{v_request.election_officer.user.name}}</span>
+		<br /> <br />		
+		{% include "admin/validation_status.html"%}
+		{% include "admin/voting_buttons.html"%} 
+	</fieldset>
+</div>
+</div>
+{% endblock %}

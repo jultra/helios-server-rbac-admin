@@ -1,0 +1,61 @@
+{% extends TEMPLATE_BASE%}
+
+{% block title %}{{election.name}}{% endblock %}
+{% block content %}
+<h2 class="title">{{election.name}} &mdash; Election Administration <span style="font-size:0.7em;">[<a href="{% url helios.views.one_election_view election.uuid %}">back to election</a>]</span></h2>
+
+<div id="breadcrumb">
+	administration | 
+	validation policies | 
+	new policy | 
+	[<a href="{% url helios.views.one_validations_list election.uuid %}">cancel</a>]
+</div>
+{% if error %}
+<p style="color: red;">
+    {{error}}
+</p>
+{% endif %}
+<div id="admin_content">
+	<form action="" method="post" id="create_policy_form">
+		<table class="john_form">
+			{{policy_form.as_p}}
+		</table>
+		<fieldset>
+			<legend>Validation Entries</legend>
+			{{ formset.management_form.as_ul }}
+			{{ formset.non_form_errors.as_ul }}
+			<table id="formset" class="list">
+			{% for form in formset.forms %}
+			  {% if forloop.first %}
+			  <thead><tr>
+			    {% for field in form.visible_fields %}
+			    <th>{{ field.label|capfirst }}</th>
+			    {% endfor %}
+			  </tr></thead>
+			  {% endif %}
+			  <tr class="{% cycle row1,row2 %}">
+			  {% for field in form.visible_fields %}
+			    <td>
+			    {# Include the hidden fields in the form #}
+			    {% if forloop.first %}
+			      {% for hidden in form.hidden_fields %}
+			      {{ hidden }}
+			      {% endfor %}
+			    {% endif %}
+			      {{ field.errors.as_ul }}
+			      {{ field }}
+			    </td>
+			  {% endfor %}
+			  </tr>
+			{% endfor %}
+			</table>
+			<input type="submit" value="add another entry" id="add" name="add" />
+		</fieldset>
+		
+		<div>
+			<br />
+			<label for="">&nbsp;</label><input type="submit" value="save policy" id="add_policy" />
+		</div>
+	</form>
+</div>
+{% endblock %}

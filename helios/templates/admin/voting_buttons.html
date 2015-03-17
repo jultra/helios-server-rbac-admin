@@ -1,0 +1,19 @@
+<div id="voting_buttons">
+	<div style="text-align:left; padding: 20px;">
+	{%if v_request.user_can_participate%}	
+		<a onclick="return confirm('Are you sure you want to APPROVE this request?');" href="{% url helios.views.approve_request v_request.election_uuid, v_request.id%}" 
+			style="font-size: 1.2em; padding:5px; background: #eee; border: 1px solid #888">approve</a>
+		<a onclick="return confirm('Are you sure you want to REJECT this request?');" href="{% url helios.views.reject_request v_request.election_uuid, v_request.id%}" 
+			style="font-size: 1.2em; padding:5px; background: #eee; border: 1px solid #888">reject</a>
+		<a onclick="return confirm('Are you sure you want to ABSTAIN on deciding this request?');" href="{%url helios.views.ignore_request v_request.election_uuid, v_request.id%}" 
+			style="font-size: 1.2em; padding:5px; background: #eee; border: 1px solid #888">abstain?</a>
+	{% else%}
+		<span 
+			style="color: gray; font-size: 1.2em; padding:5px; background: #eee; border: 1px solid #888">approve</span>
+		<span 
+			style="color: gray; font-size: 1.2em; padding:5px; background: #eee; border: 1px solid #888">reject</span>
+		<span 
+			style="color: gray; font-size: 1.2em; padding:5px; background: #eee; border: 1px solid #888">abstain?</span>
+	{%endif%}
+	</div>
+</div>

@@ -1,4 +1,3 @@
-
 {#foreach $T.questions as question}
 <div id="q_view_{$T.question$index}">
 <h4>
@@ -203,3 +202,10 @@ Result Type:&nbsp;
 </table>
 {#/if}
 </form>
+
+{#if $T.frozen}
+{#else}
+<div style="text-align:left; padding-top: 20px;">
+<a href="{$T.urls.vote}" style="font-size: 1.2em; padding:5px; background: #eee; border: 1px solid #888">preview ballot booth</a>
+</div>
+{#/if}

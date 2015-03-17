@@ -1,0 +1,51 @@
+{% extends TEMPLATE_BASE%}
+
+{% block title %}{{election.name}}{% endblock %}
+{% block content %}
+<h2 class="title">{{election.name}} &mdash; Election Administration <span style="font-size:0.7em;">[<a href="{% url helios.views.one_election_view election.uuid %}">back to election</a>]</span></h2>
+
+<div id="breadcrumb">
+	administration | 
+	validation requests | 
+	ballot | 
+	[<a href="{% url helios.views.requests_list election.uuid %}">cancel</a>]
+</div>
+{% include "info-messages.html"%}
+<div id="admin_content">
+{%if v_request %}
+<div id="data_definition">
+	<fieldset>
+		<legend>Ballot Definition</legend>
+			{% for question in v_request.data.input.questions %}
+				{{forloop.counter}} . {{question.question}} ({{question.choice_type}}, select between {{question.min}} and {{question.max}} answers)<br />
+				Answers:
+				<ul>
+				{%for answer in question.answers%}
+					<li>{{answer}}</li>
+				{%endfor%}
+				</ul>
+				<br/>			
+			{% endfor %}
+			
+			
+			<div style="text-align:left; padding-top: 20px;">
+			{% if p_url %}
+				<a href="{{ p_url }}" style="font-size: 1.2em; padding:5px; background: #eee; border: 1px solid #888">preview ballot</a>
+			{% else %}
+				<a href="" style="font-size: 1.2em; padding:5px; background: #eee; border: 1px solid #888">preview ballot</a>
+			{% endif %}
+			</div>
+		
+	</fieldset>
+</div>
+<div id="validation_history">
+	<fieldset>
+		<legend>Validation History</legend>
+		Processed by: {{v_request.election_officer.user.name}} <br />
+		{% include "admin/validation_status.html"%}
+	</fieldset>
+</div>
+{% include "admin/voting_buttons.html"%}
+{%endif%}
+</div>
+{% endblock %}

@@ -4,6 +4,6 @@ from django.conf.urls.defaults import *
 from views import *
 
 urlpatterns = patterns('',
-  (r'^$', home),
+  (r'^$', home_m),
   (r'^about$', about),
 )

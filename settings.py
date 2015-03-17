@@ -12,7 +12,7 @@ DEBUG = True
 TEMPLATE_DEBUG = DEBUG
 
 ADMINS = (
-    ('Ben Adida', 'ben@adida.net'),
+    ('John Ultra', 'john.ultra@up.edu.ph'),
 )
 
 MANAGERS = ADMINS
@@ -20,7 +20,10 @@ MANAGERS = ADMINS
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql_psycopg2',
-        'NAME': 'helios'
+        'NAME': 'heliosm',
+        'USER': 'heliosmod',
+        'PASSWORD': 'h3l10sm0d',
+        'HOST': 'localhost'
     }
 }
 
@@ -29,7 +32,7 @@ DATABASES = {
 # although not all choices may be available on all operating systems.
 # If running in a Windows environment this must be set to the same as your
 # system time zone.
-TIME_ZONE = 'America/Los_Angeles'
+TIME_ZONE = 'Asia/Manila'
 
 # Language code for this installation. All choices can be found here:
 # http://www.i18nguy.com/unicode/language-identifiers.html
@@ -56,7 +59,7 @@ MEDIA_URL = ''
 ADMIN_MEDIA_PREFIX = '/media/'
 
 # Make this unique, and don't share it with anybody.
-SECRET_KEY = get_from_env('SECRET_KEY', 'replaceme')
+SECRET_KEY = get_from_env('SECRET_KEY', 'akij18s9shbaml102kjehes4a1krbqvi87301')
 
 # List of callables that know how to import templates from various sources.
 TEMPLATE_LOADERS = (
@@ -69,6 +72,11 @@ MIDDLEWARE_CLASSES = (
     'django.middleware.common.CommonMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'messages.middleware.MessageMiddleware',
+)
+
+TEMPLATE_CONTEXT_PROCESSORS = (
+    'messages.context_processors.messages',
 )
 
 ROOT_URLCONF = 'urls'
@@ -81,16 +89,18 @@ TEMPLATE_DIRS = (
 
 INSTALLED_APPS = (
 #    'django.contrib.auth',
-#    'django.contrib.contenttypes',
+    'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.sites',
+#    'django.contrib.messages',
     ## needed for queues
     'djcelery',
     'djkombu',
     ## needed for schema migration
     'south',
     ## HELIOS stuff
-    'auth',
+    'helios_auth',
+    'messages',
     'helios',
     'server_ui',
 )
@@ -100,19 +110,20 @@ INSTALLED_APPS = (
 ##
 
 
-MEDIA_ROOT = ROOT_PATH + "media/"
+MEDIA_ROOT = ROOT_PATH + "/media/"
 
 # a relative path where voter upload files are stored
 VOTER_UPLOAD_REL_PATH = "voters/%Y/%m/%d"
 
 
 # Change your email settings
-DEFAULT_FROM_EMAIL = get_from_env('DEFAULT_FROM_EMAIL', 'ben@adida.net')
-DEFAULT_FROM_NAME = get_from_env('DEFAULT_FROM_NAME', 'Ben for Helios')
+DEFAULT_FROM_EMAIL = get_from_env('DEFAULT_FROM_EMAIL', 'Hvoting Admin Officer')
+DEFAULT_FROM_NAME = get_from_env('DEFAULT_FROM_NAME', 'Voting Administrator')
 SERVER_EMAIL = '%s <%s>' % (DEFAULT_FROM_NAME, DEFAULT_FROM_EMAIL)
 
-LOGIN_URL = '/auth/'
 LOGOUT_ON_CONFIRMATION = True
+LOGIN_URL = '/auth/'
+
 
 # The two hosts are here so the main site can be over plain HTTP
 # while the voting URLs are served over SSL.
@@ -120,8 +131,8 @@ URL_HOST = get_from_env("URL_HOST", "http://localhost:8000")
 
 # IMPORTANT: you should not change this setting once you've created
 # elections, as your elections' cast_url will then be incorrect.
-# SECURE_URL_HOST = "https://localhost:8443"
-SECURE_URL_HOST = get_from_env("SECURE_URL_HOST", "http://localhost:8000")
+SECURE_URL_HOST = "http://localhost:8000"
+#SECURE_URL_HOST = get_from_env("SECURE_URL_HOST", "http://localhost:80")
 
 # this additional host is used to iframe-isolate the social buttons,
 # which usually involve hooking in remote JavaScript, which could be
@@ -138,21 +149,57 @@ FOOTER_LOGO = False
 
 WELCOME_MESSAGE = get_from_env('WELCOME_MESSAGE', "This is the default message")
 
-HELP_EMAIL_ADDRESS = get_from_env('HELP_EMAIL_ADDRESS', 'help@heliosvoting.org')
+HELP_EMAIL_ADDRESS = get_from_env('HELP_EMAIL_ADDRESS', 'johnultra@ymail.com')
 
 AUTH_TEMPLATE_BASE = "server_ui/templates/base.html"
 HELIOS_TEMPLATE_BASE = "server_ui/templates/base.html"
-HELIOS_ADMIN_ONLY = False
+HELIOS_ADMIN_ONLY = True
 HELIOS_VOTERS_UPLOAD = True
 HELIOS_VOTERS_EMAIL = True
 
+# set the name of the default Election Administrator role
+ELECTION_ADMIN_ROLE = "Election Administrator"
+
+#set the default set of permissions of the Election Administrator role
+"""
+Possible Permission Values
+***************************
+"upload_voterfile" - User Can Upload Voters from a voter file. By Helios design, only way to add voters to an election.
+"delete_voter" - User can delete a voter, previously uploaded.
+"add_trustee" - User can add election trustee. An election trustee is involced in the decryption of voters encrypted ballots.
+"delete_trustee" - User can delete election trustee.
+"add_electionofficer" - User can add an election officer to an election.
+"change_electionofficer" - User can change election officer.
+"delete_electionofficer" - User can remove an election officer from an election. 
+"add_electionrole" - User can add an election role. 
+"change_electionrole" - User can change an election role.
+"delete_electionrole" - User can delete an election role. 
+"define_ballot" - User can create and modify the ballot for an election.
+"open_election" - User can start the election voting process.
+"close_election" - User can stop the election voting process and commence the start of canvassing.
+"change_election" - User can modify election information i.e. name, and other election attributes. 
+"can_send_trustee_url" - User can send the trustee login information
+"can_release_election_results" - User can release election results after it had been decrypted by the trustees.
+"define_ballot" - User can create or define the election's official ballot. 
+"add_policy" - User can create validation policy of a permission.
+"delete_policy" - User can delete validation policy of a permission.
+"change_policy" - User can edit validation policy of a permission.
+"""
+ELECTION_ADMIN_PERMS = ['add_electionofficer', 'change_electionofficer', 'delete_electionofficer',
+                               'add_electionrole', 'change_electionrole', 'delete_electionrole',
+                               'change_election', 'add_policy', 'delete_policy', 'change_policy',
+                               'add_trustee', 'delete_trustee', 'can_send_trustee_url']
+
+
+
+
 # are elections private by default?
-HELIOS_PRIVATE_DEFAULT = False
+HELIOS_PRIVATE_DEFAULT = True
 
 # authentication systems enabled
 #AUTH_ENABLED_AUTH_SYSTEMS = ['password','facebook','twitter', 'google', 'yahoo']
-AUTH_ENABLED_AUTH_SYSTEMS = ['google']
-AUTH_DEFAULT_AUTH_SYSTEM = None
+AUTH_ENABLED_AUTH_SYSTEMS = ['password','google']
+AUTH_DEFAULT_AUTH_SYSTEM = 'password'
 
 # facebook
 FACEBOOK_APP_ID = ''
@@ -173,11 +220,11 @@ LINKEDIN_API_KEY = ''
 LINKEDIN_API_SECRET = ''
 
 # email server
-EMAIL_HOST = get_from_env('EMAIL_HOST', 'localhost')
-EMAIL_PORT = 2525
-EMAIL_HOST_USER = get_from_env('EMAIL_HOST_USER', '')
-EMAIL_HOST_PASSWORD = get_from_env('EMAIL_HOST_PASSWORD', '')
-EMAIL_USE_TLS = False
+EMAIL_HOST = get_from_env('EMAIL_HOST', 'smtp.gmail.com')
+EMAIL_PORT = 587
+EMAIL_HOST_USER = get_from_env('EMAIL_HOST_USER', 'hvoting.adofficer@gmail.com')
+EMAIL_HOST_PASSWORD = get_from_env('EMAIL_HOST_PASSWORD', 'hv0t1ng10')
+EMAIL_USE_TLS = True
 
 # set up logging
 import logging

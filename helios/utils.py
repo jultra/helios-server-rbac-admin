@@ -9,7 +9,7 @@ import urllib, re, sys, datetime, urlparse, string
 import threading
 
 # utils from auth, too
-from auth.utils import *
+from helios_auth.utils import *
 
 from django.conf import settings
   

@@ -103,7 +103,7 @@ HELIOS.Election = Class.extend({
     openreg: this.openreg, voters_hash: this.voters_hash,
     use_voter_aliases: this.use_voter_aliases,
     voting_starts_at: this.voting_starts_at,
-    voting_ends_at: this.voting_ends_at};
+    voting_ends_at: this.voting_ends_at	};
     
     return UTILS.object_sort_keys(json_obj);
   },
@@ -129,6 +129,7 @@ HELIOS.Election.fromJSONString = function(raw_json) {
   // let's hash the raw_json
   var election = HELIOS.Election.fromJSONObject(json_object);
   election.election_hash = b64_sha256(raw_json);
+  
   
   return election;
 };

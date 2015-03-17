@@ -1,0 +1,27 @@
+{%if v_request.user_can_participate%}
+<td style="text-align: center">
+	<a onclick="return confirm('Are you sure you want to APPROVE this request?');" href="{% url helios.views.approve_request v_request.election_uuid, v_request.id%}" 
+	style="font-size: 1.0em; padding:0px; background: #eee; border: 1px solid #888">approve</a>
+</td>
+<td style="text-align: center">
+	<a onclick="return confirm('Are you sure you want to REJECT this request?');" href="{% url helios.views.reject_request v_request.election_uuid, v_request.id%}" 
+	style="font-size: 1.0em; padding:0px; background: #eee; border: 1px solid #888">reject</a>
+</td>
+<td style="text-align: center">
+	<a onclick="return confirm('Are you sure you want to ABSTAIN on deciding this request?');" href="{%url helios.views.ignore_request v_request.election_uuid, v_request.id%}" 
+	style="font-size: 1.0em; padding:0px; background: #eee; border: 1px solid #888">abstain?</a>
+</td>
+{% else%}
+<td style="text-align: center">
+	<span
+	style="color: gray; font-size: 1.0em; padding:0px; background: #eee; border: 1px solid #888">approve</span>
+</td>
+<td style="text-align: center">
+	<span
+	style="color: gray; font-size: 1.0em; padding:0px; background: #eee; border: 1px solid #888">reject</span>
+</td>
+<td style="text-align: center">
+	<span
+	style="color: gray; font-size: 1.0em; padding:0px; background: #eee; border: 1px solid #888">abstain?</span>
+</td>
+{%endif%}

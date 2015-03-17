@@ -1,25 +1,30 @@
 {% extends "helios/templates/cryptobase.html" %}
 
-{% block title %}Questions for {{election.name}}{% endblock %}
+{% block title %}Ballot for {{election.name}}{% endblock %}
 {% block content %}
-  <h2 class="title">{{election.name}} &mdash; Questions <span style="font-size:0.7em;">[<a href="{% url helios.views.one_election_view election.uuid %}">back to election</a>]</span></h2>
+  <h2 class="title">{{election.name}} &mdash; Ballot <span style="font-size:0.7em;">[<a href="{% url helios.views.one_election_view election.uuid %}">back to election</a>]</span></h2>
 
   <script language="javascript">
-{% if election.questions %}
+  
+{% ifnotequal questions_json 'null'%}
   QUESTIONS = {{questions_json|safe}};
 {% else %}
   QUESTIONS = [];
-{% endif %}
+{% endifnotequal %}
 {% if admin_p and not election.frozen_at %}
   ADMIN_P = true;
 {% else %}
   ADMIN_P = false;
 {% endif %}
-
+{% if election.frozen_at %}
+	FROZEN = true;
+{% else %}
+	FROZEN = false;
+{% endif %}
   CSRF_TOKEN = '{{csrf_token}}';
-
+  
   function refresh() {
-      $('#questions').processTemplate({'questions' : QUESTIONS, 'admin_p' : ADMIN_P}); 
+      $('#questions').processTemplate({'questions' : QUESTIONS, 'admin_p' : ADMIN_P, 'urls' : {{urls_json|safe}}, 'frozen' : FROZEN }); 
 
       add_answers($('#answer_table'),DEFAULT_NUM_ANSWERS);
  }
@@ -118,13 +123,11 @@
 
   $(document).ready(function() {
       $('#questions').setTemplateURL("/static/helios/static_templates/question.html");
-
       refresh();
   });
   
-
   </script>
-
+  {%include "info-messages.html"%}	
   <div id="questions">
   </div>
 					

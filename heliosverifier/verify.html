@@ -52,12 +52,22 @@ function load_ballots(election_url, ballot_list, ballots, final_callback) {
         return;
     }
     
+    voter = ballot_list[ballots.length]
+    
+    $.ajax({async: false, url:election_url + "/verify_object/" + voter.uuid, success:function(result){
+        	var result = JSON.parse(result)
+        	var val= "ERROR" 
+        	if (result.validity == true) val = "VERIFIED"
+			result_append("<br />verifying voter #"+(ballots.length+1) + " "+ voter.voter_name + " : " + val);	
+        }});
+
     result_append("loading ballot for voter #" + (ballots.length + 1));
         
     // get the next ballot
     $.get(election_url + "/ballots/" + ballot_list[ballots.length].uuid + '/last', function(result) {
         var new_ballot = jQuery.secureEvalJSON(result);
         ballots.push(new_ballot);
+        
         if (new_ballot.vote == null)
           result_append("no ballot for this voter #" + ballots.length);
         else
@@ -100,7 +110,15 @@ function load_election_and_ballots(election_url) {
         election = HELIOS.Election.fromJSONString(raw_json);
         result_append("loaded election: " + election.name);
         result_append("election fingerprint: " + election.get_hash());
+        $.ajax({async: false, url:election_url + "/verify_object/" + election.uuid, success:function(result){
+        	result = jQuery.secureEvalJSON(result)
+        	var val= "ERROR" 
+        	if (result.validity == true) val = "VERIFIED"
+        	result_append("verifiying Election data object: " + val);	
+        }});
         
+        
+		
         var tally = [];
 
         $(election.questions).each(function(qnum, q) {
@@ -113,13 +131,12 @@ function load_election_and_ballots(election_url) {
                 return 1;
             });
         });
-
-        result_append("loading list of voters...");
+        
+        result_append("<h3>Voters List</h3>");
         
         // load voter list
         load_ballot_list(election_url, [], null, function(ballot_list) {
-            result_append("loaded voter list, now loading ballots for each..");
-            
+        	
             // load all ballots
             load_ballots(election_url, ballot_list, [], function(ballots) {
                 result_append("");

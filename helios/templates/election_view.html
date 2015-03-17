@@ -2,6 +2,7 @@
 
 {% block title %}{{election.name}}{% endblock %}
 {% block content %}
+
 {% if election.voting_has_started %}
 <script>
 if (!navigator.javaEnabled()) {
@@ -66,11 +67,15 @@ this {{election.election_type}} is <u>not</u> featured on the front page.
 
 
 <p align="center" style="font-size: 1.5em;">
-<a href="{% url helios.views.one_election_questions election.uuid %}">questions ({% if election.questions %}{{election.questions|length}}{% else %}0{% endif %})</a>
+<a href="{% url helios.views.one_election_admin election.uuid %}">administration</a>
+&nbsp;&nbsp;|&nbsp;&nbsp;
+<a href="{% url helios.views.one_election_questions election.uuid %}">ballot definition</a>
 &nbsp;&nbsp;|&nbsp;&nbsp;
 <a href="{% url helios.views.voters_list_pretty election.uuid %}">voters &amp; ballots</a>
 &nbsp;&nbsp;|&nbsp;&nbsp;
 <a href="{% url helios.views.list_trustees_view election.uuid %}">trustees ({{trustees|length}})</a>
+<br />
+<a href="{% url helios.views.requests_list election.uuid %}"> validation requests({{no_active_v_requests}} active requests)</a>
 </p>
 
 {% if admin_p %}
@@ -89,6 +94,8 @@ this {{election.election_type}} is <u>not</u> featured on the front page.
 {% endif %}
 <p>
 
+{% include "info-messages.html"%}
+
 {% if election.result %}
 
 <!-- election complete, no next step -->
@@ -99,7 +106,17 @@ this {{election.election_type}} is <u>not</u> featured on the front page.
 {% if not election.frozen_at %}
 {% if election.issues_before_freeze %}
 {% for issue in election.issues_before_freeze %}
-{{issue.action}}{% if forloop.last %}{% else %}, and{% endif %}<br />
+	{% if issue.type == "permission"%}
+	<a href="{% url helios.views.one_election_roles_list election.uuid %}">{{issue.action}}</a>
+	{%else%}{%if issue.type == "election role"%}
+	<a href="{% url helios.views.one_election_officers_list election.uuid %}">{{issue.action}}</a>
+	{%else%}
+	{{issue.action}}
+	{%endif%}{%endif%}
+	{% if forloop.last %}
+	{% else %}
+	, and
+	{% endif %}<br />
 {% endfor %}
 {% else %}
 <a href="{% url helios.views.one_election_freeze election.uuid %}">freeze ballot and open election.</a>
@@ -244,7 +261,7 @@ You are <em>not eligible</em> to vote in this {{election.election_type}}.
 {% if election.openreg %}
 {% if election.eligibility %}
 This election is open to: {{election.pretty_eligibility|safe}}
-<a href="{{settings.SECURE_URL_HOST}}{% url auth.views.index %}?return_url={{CURRENT_URL}}">Log in</a> to check your eligibility.
+<a href="{{settings.SECURE_URL_HOST}}{% url helios_auth.views.index %}?return_url={{CURRENT_URL}}">Log in</a> to check your eligibility.
 {% else %}
 Anyone can vote in this election.
 {% endif %}
@@ -281,12 +298,13 @@ Anyone can vote in this election.
 </p>
 
 {% if not election.voting_has_started %}
+
 <p style="font-size: 1.2em;">
   <a href="{{SECURE_URL_HOST}/booth/vote.html?election_url={% url helios.views.one_election election.uuid %}">preview booth</a>
 </p>
 {% endif %}  
-
 {% endif %}
+
 
 {% if election.voting_has_stopped %}
 <p style="font-size: 1.2em;">

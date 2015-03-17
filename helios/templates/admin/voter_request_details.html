@@ -1,0 +1,44 @@
+{% extends TEMPLATE_BASE%}
+
+{% block title %}{{election.name}}{% endblock %}
+{% block content %}
+<h2 class="title">{{election.name}} &mdash; Election Administration <span style="font-size:0.7em;">[<a href="{% url helios.views.one_election_view election.uuid %}">back to election</a>]</span></h2>
+<div id="breadcrumb">
+	administration | 
+	validation requests | 
+	voter | 
+	[<a href="{% url helios.views.requests_voters election.uuid %}">cancel</a>]
+</div>
+{% include "info-messages.html"%}
+<div id="admin_content">
+{%if v_request %}
+<div id="data_definition">
+	
+	<fieldset>
+		<legend>Validation Processing Details</legend>
+		Action: <b>{{v_request.action|upper}}</b><br />
+		Uploaded by: <b>{{v_request.election_officer.user.name}}</b> <br /> <br />
+		
+		<div class="message-box">
+		{%ifequal v_request.action "add voter"%}
+			<span>REGISTRANT INFORMATION</span> <br /><br />
+			Name: {{v_request.data.input.voter_name}} <br/>
+			Email: {{v_request.data.input.voter_email}}
+		{%else%}
+			<span>VOTER INFORMATION</span> <br /><br />
+			Name: {{v_request.data.old_obj.voter_name}} <br/>
+			Email: {{v_request.data.old_obj.voter_email}}
+		{%endifequal%}
+		</div>
+	</fieldset>
+</div>
+<div id="validation_history">
+	<fieldset>
+		<legend>Validation History</legend>
+			{%include "admin/validation_status.html"%}
+	</fieldset>
+</div>
+{% include "admin/voting_buttons.html"%}	
+{%endif%}
+</div>
+{% endblock %}

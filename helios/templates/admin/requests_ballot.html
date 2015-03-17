@@ -1,0 +1,46 @@
+{% extends TEMPLATE_BASE%}
+
+{% block title %}{{election.name}}{% endblock %}
+{% block content %}
+<h2 class="title">{{election.name}} &mdash; Election Administration <span style="font-size:0.7em;">[<a href="{% url helios.views.one_election_view election.uuid %}">back to election</a>]</span></h2>
+
+<div id="breadcrumb">
+	administration | 
+	validation requests | 
+	ballot | 
+	[<a href="{% url helios.views.requests_list election.uuid %}">cancel</a>]
+</div>
+{% include "info-messages.html"%}
+<div id="admin_content">
+<table class="list" style="text-align: left">
+	<tr><th>Task</th><th>Requested On</th><th>Designed By</th>
+		<th>Status</th><th colspan="3" style="text-align: center">Action</th></tr>
+			{% for v_request in ballot_requests %}
+			<tr>		
+			<td style="color: blue">
+				<b>{{v_request.action|upper}}</b>
+			</td>
+			<td>
+				{{v_request.requested_at}}
+			</td>
+			<td>
+				{{v_request.election_officer.user.name}}
+			</td>
+			<td>
+				{% if v_request.status == "Terminated-Valid"%}
+					<span style="color: green">{{v_request.status}}</span>
+				{% else %}{%if v_request.status == "Terminated-Invalid"%}
+					<span style="color: red">{{v_request.status}}</span>
+				{% else %}
+					<span style="color: orange">{{v_request.status}}</span>
+				{% endif%}{% endif%}
+				[<a href="{% url helios.views.ballot_req_details election.uuid, v_request.id%}">more info</a>]
+			</td>
+			{%include "admin/table_voting_buttons.html"%}
+		</tr>
+		{% empty %}
+			<td colspan="6" style="color: red"> NO NEW ballot design requests have been filed.</td>
+		{% endfor %}
+</table>
+</div>
+{% endblock %}

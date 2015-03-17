@@ -1,0 +1,53 @@
+{% extends TEMPLATE_BASE%}
+
+{% block title %}{{election.name}}{% endblock %}
+{% block content %}
+<h2 class="title">{{election.name}} &mdash; Election Administration <span style="font-size:0.7em;">[<a href="{% url helios.views.one_election_view election.uuid %}">back to election</a>]</span></h2>
+
+<div id="breadcrumb">
+	<a href="{% url helios.views.one_election_admin election.uuid %}">administration</a> | 
+	election roles
+</div>
+<br />
+<span style="font-size: 1.3em">
+In this page, you can create, change, and delete election roles. <br />
+Permissions correspond to the available election activities or tasks that can be <br /> 
+performed on this election system. An election can only be started once all <br />
+available permissions are assigned to some election role. <br /> 
+</span>
+	
+{% include "info-messages.html" %}
+<div id="admin_content">
+	<span id="options">
+		<a href="{% url helios.views.role_new election.uuid %}"> add role</a>
+	</span>	
+	<table class="list" style="text-align: left">
+		<tr><th>Role</th><th>Permissions</th></tr>
+		{%for role in e_roles %}
+			<tr>
+				<td>
+					<a = href="{% url helios.views.role_edit election.uuid, role.id %}">{{role.name}}</a>
+					[<a onclick="return confirm('are you sure you want to remove {{role.name}}?');" 
+						href="{% url helios.views.role_delete election.uuid, role.id %}" >x</a>]
+				</td>
+				<td>
+					{% for perm in role.permissions.all%}
+						{% if forloop.last%}
+							{{perm.name}}
+						{%else%}
+							{{perm.name}},
+						{%endif%}
+					{% empty%}
+						None!
+					{% endfor%}
+				</td>
+				
+			</tr>
+		{% endfor %}
+	
+		{% if not e_roles %}
+			<tr><td>No Election Roles Yet!</td></tr>
+		{% endif %}
+	</table>
+</div>
+{% endblock%}

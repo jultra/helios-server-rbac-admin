@@ -1,0 +1,26 @@
+{% extends TEMPLATE_BASE%}
+
+{% block title %}{{election.name}}{% endblock %}
+{% block content %}
+<h2 class="title">{{election.name}} &mdash; Election Administration <span style="font-size:0.7em;">[<a href="{% url helios.views.one_election_view election.uuid %}">back to election</a>]</span></h2>
+
+<div id="breadcrumb">
+	<a href="{% url helios.views.one_election_admin election.uuid %}">administration</a> |
+	validation requests
+</div>
+
+<p align="center" style="font-size: 1.3em;">
+			In this page, you will have access to the different validation requests <br />
+			created during the conduct of the election. Any validation request will be available to any <br /> 
+			of the links below.</p>
+<div align="center" style="font-size: 1.5em; padding-top: 20px">	
+	<a href="{% url helios.views.requests_ballot election.uuid %}">election ballot({{no_active_ballot_requests}})</a>
+	&nbsp;&nbsp;|&nbsp;&nbsp;
+	<a href="{% url helios.views.requests_voters election.uuid %}">election voters({{no_active_voter_requests}})</a>
+	&nbsp;&nbsp;|&nbsp;&nbsp;
+	<!--<a href="{% url helios.views.requests_trustees election.uuid %}">election trustees</a>
+	<br/>
+	<br/>-->
+	<a href="{% url helios.views.other_requests election.uuid %}">other election procedures({{no_active_other_requests}})</a>
+</div>
+{% endblock %}

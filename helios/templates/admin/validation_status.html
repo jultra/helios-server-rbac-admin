@@ -1,0 +1,51 @@
+<span style="font-size: 1.3em;"><b>Overall Validation Status: 
+{% if v_request.status == "Terminated-Valid"%}
+	<span style="color: green">{{v_request.status}}</span>
+{% else %}{%if v_request.status == "Terminated-Invalid"%}
+	<span style="color: red">{{v_request.status}}</span>
+{% else %}
+	<span style="color: orange">{{v_request.status}}</span>
+{% endif%}{% endif%}</b></span>
+<br /> <br />
+<p align="center"><b>DETAILS</b> <br /></p>
+{% for entry in v_history%}
+<b>STEP {{forloop.counter}} [
+	<span class="{{entry.status}}">{{entry.status}}</span>
+	]</b>:	
+	{%if entry.status != "Inactive-Invalid"%}
+	<b> So far</b> 
+	<span style="color: green">approved by:</span>
+	{% if entry.approved_by%}
+		{%for name in entry.approved_by%}
+			{{name}}
+		{%if forloop.last%}
+		{%else%},{%endif%}
+		{%endfor%}
+	{%else%}None!{%endif%}
+	,<span style="color: red"> rejected by:</span>
+	{% if entry.rejected_by%}
+		{%for name in entry.rejected_by%}
+		{{name}}
+		{%if forloop.last%}
+		{%else%},{%endif%}
+		{%endfor%}
+	{%else%}None!{%endif%}
+	,<span style="color: blue"> abstention:</span>
+	{% if entry.abstention%}
+		{%for name in entry.abstention%}
+		{{name}}
+		{%if forloop.last%}
+		{%else%},{%endif%}
+		{%endfor%}
+	{%else%}None!{%endif%}
+	{%endif%}
+<br />	 
+<b>DESCRIPTION</b>: {{entry.validation_entry.description}}, can be performed by election officers 
+who belong to role <b>{{entry.validation_entry.election_role}}</b>, and <b>requires {{entry.validation_entry.needed_signatures}} approval</b> 
+to be satisfied and considered valid. <br /> 
+<br /><br /> 
+{% empty %}
+There was <b style="color: red">NO</b> validation policy associated to the task <b>{{v_request.action|upper}}</b> when this action was requested, <br /> 
+so it was immediately committed into the system without any validation.
+{% endfor %}
+</p>

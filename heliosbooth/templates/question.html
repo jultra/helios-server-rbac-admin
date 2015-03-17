@@ -35,10 +35,21 @@ as many of the choices as you approve of
 </div>
 
 
+
 {#if $T.show_reviewall}
-<div style="float: right;">
-<input type="button" onclick="BOOTH.validate_and_confirm({$T.question_num});" value="Proceed" />
-</div>
+	<div style="float: right;">
+	<input type="button" onclick="BOOTH.validate_and_confirm({$T.question_num});" value="Proceed" />
+	</div>
+	<!--{#if BOOTH.election.frozen_at}
+		<div style="float: right;">
+		<input type="button" onclick="BOOTH.validate_and_confirm({$T.question_num});" value="Proceed" />
+		</div>
+	{#else}
+		<div style="float: right;">
+		<input type="button" onclick="BOOTH.exit()" value="Exit Booth Preview" />
+		</div>	
+	{#/if}-->
+
 {#/if}
 
 {#if $T.question_num != 0}

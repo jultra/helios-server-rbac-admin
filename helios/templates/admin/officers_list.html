@@ -1,0 +1,56 @@
+{% extends TEMPLATE_BASE%}
+
+{% block title %}{{election.name}}{% endblock %}
+{% block content %}
+<h2 class="title">{{election.name}} &mdash; Election Administration <span style="font-size:0.7em;">[<a href="{% url helios.views.one_election_view election.uuid %}">back to election</a>]</span></h2>
+
+<div id="breadcrumb">
+	<a href="{% url helios.views.one_election_admin election.uuid %}">administration</a> | 
+	election officers	
+</div>
+<br />
+<span style="font-size: 1.3em">
+In this page, you can add, change, and remove election officers <br /> 
+for this election. In this system, an election officer is anyone who <br /> 
+participates in performing administration activities e.g. defining election ballot, <br>
+adding voters, opening and closing election, etc.  
+</span>
+
+{% include "info-messages.html" %}	
+<div id="admin_content">
+<span id="options">
+	<a href="{% url helios.views.user_new election.uuid %}"> add officer</a>
+</span>	
+<table class="list">
+	<tr>
+		<th>username</th><th>email address</th><th>name</th><th>Assigned Roles</th>
+	</tr>
+	
+	{% for officer in officers %}
+	<tr>
+		<td>
+			<a href="{% url helios.views.user_edit election.uuid, officer.id%}">{{officer.user.user_id}}</a>
+			[<a onclick="return confirm('are you sure you want to remove {{officer.user.name}}?');" 
+						href="{% url helios.views.user_delete election.uuid, officer.id %}" >x</a>]
+		</td>
+		<td>{{officer.user.info.email}}</td>
+		<td>{{officer.user.name}}</td>
+		<td>
+			{% for role in officer.electionrole.all %}
+				{%if role.name == "Election Administrator"%}
+					<span style="color:blue">{{role}}</span>
+				{%else%}
+					{{role}}
+				{%endif%}
+				{% if forloop.last%}
+				
+				{%else%},
+				{%endif%}
+			{% endfor %}
+		</td>
+	</tr>
+	{% endfor %}
+</table>
+
+</div>
+{% endblock %}

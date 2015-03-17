@@ -1,0 +1,33 @@
+{% extends TEMPLATE_BASE%}
+
+{% block title %}{{election.name}}{% endblock %}
+{% block content %}
+<h2 class="title">{{election.name}} &mdash; Election Administration <span style="font-size:0.7em;">[<a href="{% url helios.views.one_election_view election.uuid %}">back to election</a>]</span></h2>
+
+<div id="breadcrumb">
+	administration | 
+	election roles | 
+	new role | 
+	[<a href="{% url helios.views.one_election_roles_list election.uuid %}">cancel</a>]
+</div>
+<br />
+<span style="font-size: 1.3em">
+This is the page for creating a new election role. Give it a descriptive name <br /> 
+and associate some permissions to it. An example is a role called <br />
+<i>Registration Officer</i> with the permissions: <i> Can delete voter</i> <br />
+and <i>Can upload voters list </i>. You can also add a role which is <b>not assigned <br />
+any permission </b> which you can use in defining 
+<a href="{% url helios.views.one_validations_list election.uuid %}">validation policies.</a>    
+</span>
+<div id="admin_content">
+	<form action="" method="post" id="create_role_form">
+		<table class="john_form">
+			{{role_form.as_table}}
+		</table>
+		<div>
+			<br />
+			<label for="">&nbsp;</label><input type="submit" value="add role" id="add_role" />
+		</div>
+	</form>
+</div>
+{% endblock %}

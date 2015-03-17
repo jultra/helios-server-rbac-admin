@@ -11,6 +11,15 @@ from django.core.paginator import Paginator
 from django.http import *
 from django.db import transaction
 
+#added by john
+import messages
+
+from django.contrib.contenttypes.models import ContentType
+
+from django.forms.formsets import formset_factory
+from django.forms.models import modelformset_factory
+from django.utils.functional import curry
+
 from mimetypes import guess_type
 
 import csv, urllib, os, base64
@@ -21,21 +30,21 @@ from workflows import homomorphic
 from helios import utils as helios_utils
 from view_utils import *
 
-from auth.security import *
-from auth.auth_systems import AUTH_SYSTEMS, can_list_categories
-from auth.models import AuthenticationExpired
+from helios_auth.security import *
+from helios_auth.auth_systems import AUTH_SYSTEMS, can_list_categories
+from helios_auth.models import AuthenticationExpired
 
 from helios import security
-from auth import views as auth_views
+from helios_auth import views as auth_views
 
 import tasks
 
 from security import *
-from auth.security import get_user, save_in_session_across_logouts
+from helios_auth.security import get_user, save_in_session_across_logouts
 
 import uuid, datetime
 
-from models import *
+from models import * 
 
 import forms, signals
 
@@ -196,11 +205,17 @@ def trustee_keygenerator(request, election, trustee):
 
 @login_required
 def elections_administered(request):
-  if not can_create_election(request):
+  #check modified by John Ultra
+  user = get_user(request)
+  
+  #this will show elections where a user is an election officer, not necessarily admin 
+  #if not can_create_election(request):
+  if not user_can_officiate_election(user):
     return HttpResponseForbidden('only an administrator has elections to administer')
   
-  user = get_user(request)
-  elections = Election.get_by_user_as_admin(user)
+  #modified by John Ultra, now gets all election which the user is an officer
+  #elections = Election.get_by_user_as_admin(user)
+  elections = Election.get_by_user_as_officer(user)
   
   return render_template(request, "elections_administered", {'elections': elections})
 
@@ -240,12 +255,39 @@ def election_new(request):
         election_params['admin'] = user
         
         election, created_p = Election.get_or_create(**election_params)
-      
+        
+        #TODO: I think it's much better that we create a default election role, Election Administrator
+        #everytime we create a new election. Election Administrator role by default shall possess permissions 
+        #such as, Can add election officer, Open Election, Close Election, Can Add Trustee
+    
+        #name = 'Election Administration'
+        #election = election
+        #e_admin = ElectionRole(name = name, election=election)
+        
+        #set the election creator as first election administrator
+        #officer_role = 
+        
+        #since one of our goals is to distribute administration of election as much as possible, meaning not
+        #execution of the different election activities is not performed by a minimum number of users.
+        #critical election tasks such voters registration, election contest creation, should be performed by
+        #another subset of users
+        
         if created_p:
-          # add Helios as a trustee by default
-          election.generate_trustee(ELGAMAL_PARAMS)
-          
-          return HttpResponseRedirect(reverse(one_election_view, args=[election.uuid]))
+            # add Helios as a trustee by default
+            election.generate_trustee(ELGAMAL_PARAMS)
+                        
+            #added code by John Ultra
+            #add the current user, election creator as Election Admin by default
+            election_officer = ElectionOfficer.objects.create(user=user, election=election, super_p = True )
+            election_officer.save()
+            
+            #create default Election Administrator role for this election
+            election_admin_role = ElectionRole.get_or_create_election_admin_role(election)
+            
+            #add Election Administrator role to roles of election creator.Assumes that he is an admin and He MUST be!
+            election_officer.electionrole.add(election_admin_role)
+        
+            return HttpResponseRedirect(reverse(one_election_view, args=[election.uuid]))
         else:
           error = "An election with short name %s already exists" % election_params['short_name']
       else:
@@ -253,8 +295,9 @@ def election_new(request):
     
   return render_template(request, "election_new", {'election_form': election_form, 'error': error})
   
-@election_admin(frozen=False)
-def one_election_edit(request, election):
+@election_admin(frozen=False, perm_needed='change_election')
+#@election_view(frozen=False, perm_needed='change_election')
+def one_election_edit(request, election, **kw):
 
   error = None
   RELEVANT_FIELDS = ['short_name', 'name', 'description', 'use_voter_aliases', 'election_type', 'private_p']
@@ -279,17 +322,54 @@ def one_election_edit(request, election):
   
   return render_template(request, "election_edit", {'election_form' : election_form, 'election' : election, 'error': error})
 
-@election_admin(frozen=False)
+@election_admin(frozen=False, perm_needed='change_election')
 def one_election_schedule(request, election):
   return HttpResponse("foo")
 
 @election_view()
 @json
-def one_election(request, election):
+def one_election(request, election, caller=None, vr_id=None):
   if not election:
     raise Http404
-  return election.toJSONDict(complete=True)
 
+  #by default, we assume that this is called from a non-validation request page
+  election_dict = election.toJSONDict(update=True)
+
+  #FIXME  
+  # we need to put questions_url, for ballot booth previewing.
+  # adding it to election object, mess up its hash. so we 
+  # add this additional info if we are on preview mode.
+  # should find a better way to do this
+  if not election.frozen_at: 
+      election_dict['questions_url'] =  settings.SECURE_URL_HOST + reverse(one_election_questions, args=[election.uuid])
+      
+  #else we have no question, maybe this request comes from requests_ballot page preview link,    
+  if caller == 'ballot_request' and vr_id:
+      
+      try:
+          
+          vr_ballot = ValidationRequest.objects.get(id=vr_id)
+          election.questions = vr_ballot.data['input']['questions']
+          election_dict = election.toJSONDict(update=True)
+          election_dict['questions_url'] =  settings.SECURE_URL_HOST + reverse(requests_ballot, args=[election.uuid])
+      except ObjectDoesNotExist:
+          pass
+  else:
+      #check if the requesting user has Define Ballot permission
+      perm_needed = 'define_ballot'
+      user = get_user(request)
+      admin_p = security.user_has_perm(user, election, perm_needed)
+      
+      if admin_p and not election.frozen_at:
+          try:
+              vr_ballot = ValidationRequest.objects.get(election_uuid = election.uuid, action = Election.DEFINE_BALLOT, terminated_at__isnull=True)
+              election.questions = vr_ballot.data['input']['questions']    
+              election_dict = election.toJSONDict(complete=True)
+              election_dict['questions_url'] =  settings.SECURE_URL_HOST + reverse(one_election_questions, args=[election.uuid])  
+          except ObjectDoesNotExist:
+              pass
+  return election_dict
+  
 @election_view()
 def election_badge(request, election):
   election_url = get_election_url(election)
@@ -300,8 +380,10 @@ def election_badge(request, election):
 
 @election_view()
 def one_election_view(request, election):
+
   user = get_user(request)
-  admin_p = security.user_can_admin_election(user, election)
+  #admin_p = security.user_can_admin_election(user, election)
+  admin_p = security.user_can_officiate_election(user, election)
   can_feature_p = security.user_can_feature_election(user, election)
   
   notregistered = False
@@ -348,13 +430,16 @@ def one_election_view(request, election):
   socialbuttons_url = get_socialbuttons_url(election_url, status_update_message)
 
   trustees = Trustee.get_by_election(election)
-
+  
+  active_v_requests = ValidationRequest.get_active_requests_by_election(election)
+  
   return render_template(request, 'election_view',
                          {'election' : election, 'trustees': trustees, 'admin_p': admin_p, 'user': user,
                           'voter': voter, 'votes': votes, 'notregistered': notregistered, 'eligible_p': eligible_p,
                           'can_feature_p': can_feature_p, 'election_url' : election_url, 
                           'vote_url': vote_url, 'election_badge_url' : election_badge_url,
-                          'test_cookie_url': test_cookie_url, 'socialbuttons_url' : socialbuttons_url})
+                          'test_cookie_url': test_cookie_url, 'socialbuttons_url' : socialbuttons_url,
+                          'no_active_v_requests':len(active_v_requests)})
 
 def test_cookie(request):
   continue_url = request.GET['continue_url']
@@ -398,11 +483,12 @@ def list_trustees(request, election):
 def list_trustees_view(request, election):
   trustees = Trustee.get_by_election(election)
   user = get_user(request)
-  admin_p = security.user_can_admin_election(user, election)
+  #admin_p = security.user_can_admin_election(user, election)
   
+  admin_p = security.user_can_officiate_election(user, election)
   return render_template(request, 'list_trustees', {'election': election, 'trustees': trustees, 'admin_p':admin_p})
   
-@election_admin(frozen=False)
+@election_admin(frozen=False, perm_needed='add_trustee')
 def new_trustee(request, election):
   if request.method == "GET":
     return render_template(request, 'new_trustee', {'election' : election})
@@ -415,7 +501,7 @@ def new_trustee(request, election):
     trustee.save()
     return HttpResponseRedirect(reverse(list_trustees_view, args=[election.uuid]))
 
-@election_admin(frozen=False)
+@election_admin(frozen=False, perm_needed='add_trustee')
 def new_trustee_helios(request, election):
   """
   Make Helios a trustee of the election
@@ -423,7 +509,7 @@ def new_trustee_helios(request, election):
   election.generate_trustee(ELGAMAL_PARAMS)
   return HttpResponseRedirect(reverse(list_trustees_view, args=[election.uuid]))
   
-@election_admin(frozen=False)
+@election_admin(frozen=False, perm_needed='delete_trustee')
 def delete_trustee(request, election):
   trustee = Trustee.get_by_election_and_uuid(election, request.GET['uuid'])
   trustee.delete()
@@ -447,7 +533,7 @@ def trustee_login(request, election_short_name, trustee_email, trustee_secret):
 
   return HttpResponseRedirect("/")
 
-@election_admin()
+@election_admin(perm_needed='can_send_trustee_url')
 def trustee_send_url(request, election, trustee_uuid):
   trustee = Trustee.get_by_election_and_uuid(election, trustee_uuid)
   
@@ -847,8 +933,8 @@ def one_election_audited_ballots(request, election):
   return render_template(request, 'election_audited_ballots', {'election': election, 'audited_ballots': audited_ballots, 'next_after': next_after,
                 'offset': offset, 'limit': limit, 'offset_plus_one': offset+1, 'offset_plus_limit': offset+limit})
 
-@election_admin()
-def voter_delete(request, election, voter_uuid):
+@election_admin(perm_needed='delete_voter')
+def voter_delete(request, election, voter_uuid, **kw):
   """
   Two conditions under which a voter can be deleted:
   - election is not frozen or
@@ -864,15 +950,35 @@ def voter_delete(request, election, voter_uuid):
 
   voter = Voter.get_by_election_and_uuid(election, voter_uuid)
   if voter:
-    voter.delete()
+    data = {'old_obj': voter.toJSONDict(update=True),
+            'input':{},
+            'output':{}}
+    try:
+        v_policy = ValidationPolicy.get_by_election_and_perm(election, perm_codename=kw['perm_needed'])
+        req_data = {'uuid':voter.uuid,
+                    'data':data,
+                    'action':Voter.DELETE,
+                    'modeltype':helios.VOTER,
+                    'vp':v_policy}
+        ValidationRequest.create(get_user(request), election, req_data)
+        messages.info(request, "Your request to remove %s from the list of voters has been filed." % (voter.voter_name))
+    except:
+        req_data = {'uuid':voter.uuid,
+                    'data':data,
+                    'action':Voter.DELETE,
+                    'modeltype':helios.VOTER,
+                    'vp':None}
+        v_request = ValidationRequest.create(get_user(request), election, req_data)
+        voter.delete()
+        v_request.commit()
 
-  if election.frozen_at:
-    # log it
-    election.append_log("Voter %s/%s removed after election frozen" % (voter.voter_type,voter.voter_id))
+        if election.frozen_at:
+            # log it
+            election.append_log("Voter %s/%s removed after election frozen" % (voter.voter_type,voter.voter_id))
     
   return HttpResponseRedirect(reverse(voters_list_pretty, args=[election.uuid]))
 
-@election_admin(frozen=False)
+@election_admin(frozen=False, perm_needed='change_election')
 def one_election_set_reg(request, election):
   """
   Set whether this is open registration or not
@@ -885,7 +991,7 @@ def one_election_set_reg(request, election):
   
   return HttpResponseRedirect(reverse(voters_list_pretty, args=[election.uuid]))
 
-@election_admin()
+@election_admin(perm_needed='change_election')
 def one_election_set_featured(request, election):
   """
   Set whether this is a featured election or not
@@ -901,7 +1007,7 @@ def one_election_set_featured(request, election):
   
   return HttpResponseRedirect(reverse(one_election_view, args=[election.uuid]))
 
-@election_admin()
+@election_admin(perm_needed='change_election')
 def one_election_archive(request, election):
   
   archive_p = request.GET.get('archive_p', True)
@@ -919,12 +1025,88 @@ def one_election_archive(request, election):
 # anyone can see the questions, the administration aspect is now
 # built into the page
 @election_view()
-def one_election_questions(request, election):
+def one_election_questions(request, election, **kw):
+  perm_needed = 'define_ballot'
+  
   questions_json = utils.to_json(election.questions)
+  
+  #print questions_json
   user = get_user(request)
-  admin_p = security.user_can_admin_election(user, election)
+  
+  #added by John Ultra
+  #allow ballot booth preview viewing
+  #set ballot booth url
+  urls_json = {
+          'questions': settings.SECURE_URL_HOST + reverse(one_election_questions, args=[election.uuid]),
+          'vote' : "%s/booth/vote.html?%s" % (settings.SECURE_URL_HOST, urllib.urlencode({'election_url' : reverse(one_election, args=[election.uuid])}))
+         }
+  #admin_p = security.user_can_admin_election(user, election)
+  #admin_p = security.user_can_officiate_election(user, election)
+  
+  admin_p = security.user_has_perm(user, election, perm_needed)
+    
+  #if user can define election ballot, then he must be here to do so.
+  if admin_p:
+      # questions is still empty
+      #if not election.questions:
+      #check if a validation request for a ballot been made already      
+      try:
+          v_request = ValidationRequest.objects.get(election_uuid=election.uuid, action=Election.DEFINE_BALLOT, terminated_at__isnull=True, committed_at__isnull=True)          
+          questions_json = utils.to_json(v_request.data['input']['questions'])
+          messages.info(request, "There is a PENDING ballot design request that is being processed.")
+          messages.error(request, "Modifying the ballot design displayed on this page will invalidate its current progress and will reset its validation process.", extra_tags='pending_ballot')
+      except ObjectDoesNotExist:
+          pass
+      
+  return render_template(request, 'election_questions', {'election': election, 'questions_json' : questions_json, 
+                                                         'admin_p': admin_p,
+                                                         'urls_json':utils.to_json(urls_json)})
 
-  return render_template(request, 'election_questions', {'election': election, 'questions_json' : questions_json, 'admin_p': admin_p})
+@election_admin(frozen=False, perm_needed='define_ballot')
+def one_election_save_questions(request, election, **kw):
+
+  vp = None
+  check_csrf(request)
+  
+  election.questions = utils.from_json(request.POST['questions_json'])
+  
+  #prepare the data
+  old_obj = Election.objects.get(id=election.id).toJSONDict(update=True)
+  input = {'questions':election.questions}
+  output = {}
+  
+  data = {'old_obj':old_obj,
+         'input':input,
+         'output':output # new object, if input is saved
+         }
+
+  try:
+      #get validation policy for permission of this task
+      v_policy = ValidationPolicy.get_by_election_and_perm(election, perm_codename=kw['perm_needed'])
+      req_data = { 'uuid' : election.uuid,
+                'data': data, 
+                'action' : Election.DEFINE_BALLOT,
+                'modeltype': helios.ELECTION,
+                'vp' : v_policy
+              }
+      #ValidationRequest.update_or_create(get_user(request), election, req_data=req_data)
+      ValidationRequest.update_or_create(get_user(request), election, req_data=req_data)
+      
+  except:
+      #Oh, permission does not have validation policy so continue with its usual processing.
+      req_data = { 'uuid' : election.uuid,
+                'data': data,
+                'action' : Election.DEFINE_BALLOT,
+                'modeltype': helios.ELECTION,
+                'vp' : None
+              }
+      v_request = ValidationRequest.update_or_create(get_user(request), election, req_data=req_data)
+      election.save()
+      v_request.data['output'] = election.toJSONDict(update=True)
+      v_request.save()
+      v_request.commit()
+  # always a machine API
+  return SUCCESS
 
 def _check_eligibility(election, user):
   # prevent password-users from signing up willy-nilly for other elections, doesn't make sense
@@ -954,20 +1136,11 @@ def one_election_register(request, election):
     
   return HttpResponseRedirect(reverse(one_election_view, args=[election.uuid]))
 
-@election_admin(frozen=False)
-def one_election_save_questions(request, election):
-  check_csrf(request)
-  
-  election.questions = utils.from_json(request.POST['questions_json'])
-  election.save()
-
-  # always a machine API
-  return SUCCESS
-
-@transaction.commit_on_success
-@election_admin(frozen=False)
-def one_election_freeze(request, election):
+#@transaction.commit_on_success
+@election_admin(frozen=False, perm_needed='open_election')
+def one_election_freeze(request, election, **kw):
   # figure out the number of questions and trustees
+    
   issues = election.issues_before_freeze
 
   if request.method == "GET":
@@ -975,8 +1148,46 @@ def one_election_freeze(request, election):
   else:
     check_csrf(request)
     
-    election.freeze()
-
+    
+    try:
+        pending_request = ValidationRequest.objects.get(election_uuid=election.uuid, action=Election.OPEN, committed_at__isnull=True, terminated_at__isnull=True)
+        messages.error(request, "There is currently a PENDING request to OPEN this election. " + 
+                        "Please wait for its processing to terminate first.", extra_tags='pending_request')
+    
+    except:
+        #prepare data
+        old_obj = election.toJSONDict(update=True)
+        input = {}
+        output = {}
+        
+        data = {'old_obj':old_obj,
+                'input':input,
+                'output':output}
+        try: 
+            v_policy = ValidationPolicy.get_by_election_and_perm(election, perm_codename=kw['perm_needed'])
+            req_data = {'uuid': election.uuid,
+                        'data': data,
+                        'action': Election.OPEN,
+                        'modeltype':helios.ELECTION,
+                        'vp':v_policy,
+                        }
+            ValidationRequest.create(get_user(request), election, req_data)
+            messages.info(request, "Your request to open the election has been filed.")
+        except:
+            req_data = {'uuid': election.uuid,
+                        'data': data,
+                        'action': Election.OPEN,
+                        'modeltype':helios.ELECTION,
+                        'vp':None,
+                        }
+            v_request = ValidationRequest.create(get_user(request), election, req_data)
+            election.freeze()
+            election.append_log(ElectionLog.FROZEN)
+            election.save()
+            v_request.data['output'] = election.toJSONDict(update=True)
+            v_request.save()
+            v_request.commit()
+            messages.success(request, "The election is now officially open.")
     if get_user(request):
       return HttpResponseRedirect(reverse(one_election_view, args=[election.uuid]))
     else:
@@ -988,8 +1199,8 @@ def _check_election_tally_type(election):
       return False
   return True
 
-@election_admin(frozen=True)
-def one_election_compute_tally(request, election):
+@election_admin(frozen=True, perm_needed='close_election')
+def one_election_compute_tally(request, election, **kw):
   """
   tallying is done all at a time now
   """
@@ -1001,14 +1212,43 @@ def one_election_compute_tally(request, election):
   
   check_csrf(request)
 
-  if not election.voting_ended_at:
-    election.voting_ended_at = datetime.datetime.utcnow()
-
-  election.tallying_started_at = datetime.datetime.utcnow()
-  election.save()
-
-  tasks.election_compute_tally.delay(election_id = election.id)
-
+  try:
+      pending_request = ValidationRequest.objects.get(election_uuid=election.uuid,action=Election.CLOSE, committed_at__isnull=True, terminate_at__isnull=True)
+      messages.error(request, "There is currently a PENDING request to CLOSE this election. " + 
+                        "Please wait for its processing to terminate first." , extra_tags="pending_request")
+  except:
+      data = {'old_obj':election.toJSONDict(update=True),
+              'input':{},
+              'output':{}}
+      try:
+          v_policy = ValidationPolicy.get_by_election_and_perm(election, perm_codename=kw['perm_needed'])
+          req_data = {'uuid': election.uuid,
+                        'data': data,
+                        'action': Election.CLOSE,
+                        'modeltype':helios.ELECTION,
+                        'vp':v_policy,
+                        }
+          ValidationRequest.create(get_user(request), election, req_data)
+          messages.info(request, "Your request to close the election has been filed.")
+      except:
+          if not election.voting_ended_at:
+            election.voting_ended_at = datetime.datetime.utcnow()
+        
+          req_data = {'uuid': election.uuid,
+                        'data': data,
+                        'action': Election.CLOSE,
+                        'modeltype':helios.ELECTION,
+                        'vp':None,
+                        }
+          v_request = ValidationRequest.create(get_user(request), election, req_data)
+          
+          election.tallying_started_at = datetime.datetime.utcnow()
+          election.save()
+          tasks.election_compute_tally.delay(election_id = election.id)
+          v_request.data['output'] = election.toJSONDict(update=True)
+          v_request.save()
+          v_request.commit()
+          messages.success(request, "The tallying of votes have started.")
   return HttpResponseRedirect(reverse(one_election_view,args=[election.uuid]))
 
 @trustee_check
@@ -1041,27 +1281,63 @@ def trustee_upload_decryption(request, election, trustee_uuid):
       election.admin.send_message("%s - trustee partial decryption" % election.name, "trustee %s (%s) did their partial decryption." % (trustee.name, trustee.email))
     except:
       # ah well
+      # LoL!!
       pass
     
     return SUCCESS
   else:
     return FAILURE
   
-@election_admin(frozen=True)
-def combine_decryptions(request, election):
+@election_admin(frozen=True, perm_needed='can_release_election_results')
+def combine_decryptions(request, election, **kw):
   """
   combine trustee decryptions
   """
+  #perm_needed = 'can_release_election_results'
+  if not security.user_has_perm(get_user(request), election, kw['perm_needed']):
+      raise PermissionDenied()
 
   election_url = get_election_url(election)
-
+  
   if request.method == "POST":
     check_csrf(request)
-
-    election.combine_decryptions()
-    election.save()
-
-    return HttpResponseRedirect("%s?%s" % (reverse(voters_email, args=[election.uuid]), urllib.urlencode({'template': 'result'})))
+    
+    try:
+        pending_request = ValidationRequest.objects.get(election_uuid=election.uuid, action=Election.RELEASE, committed_at__isnull=True, terminated_at__isnull=True)
+        messages.error(request, "There is currently a PENDING request to OPEN this election. " + 
+                        "Please wait for its processing to terminate first.", extra_tags="pending_request")
+        
+        return HttpResponseRedirect(reverse(one_election_view, args=[election.uuid]))
+    except:
+        
+        data = {'old_obj': election.toJSONDict(update=True),
+                'input':{},
+                'output':{}}
+        try:
+            v_policy = ValidationPolicy.get_by_election_and_perm(election, perm_codename=kw['perm_needed'])
+            req_data = {'uuid': election.uuid,
+                        'data': data,
+                        'action': Election.RELEASE,
+                        'modeltype':helios.ELECTION,
+                        'vp':v_policy,
+                        }
+            ValidationRequest.create(get_user(request), election, req_data)
+            messages.info(request, "Your request to release the election results has been filed.")
+        except:
+            req_data = {'uuid': election.uuid,
+                        'data': data,
+                        'action': Election.RELEASE,
+                        'modeltype':helios.ELECTION,
+                        'vp':None,
+                        }
+            v_request = ValidationRequest.create(get_user(request), election, req_data)        
+            election.combine_decryptions()
+            election.save()
+            v_request.data['output'] = election.toJSONDict(update=True)
+            v_request.save()
+            v_request.commit()
+            messages.info(request, "The results of the election is now officially released.")
+            return HttpResponseRedirect("%s?%s" % (reverse(voters_email, args=[election.uuid]), urllib.urlencode({'template': 'result'})))
 
   # if just viewing the form or the form is not valid
   return render_template(request, 'combine_decryptions', {'election': election})
@@ -1102,7 +1378,8 @@ def voters_list_pretty(request, election):
     order_by = 'alias'
 
   user = get_user(request)
-  admin_p = security.user_can_admin_election(user, election)
+  #admin_p = security.user_can_admin_election(user, election)
+  admin_p = security.user_can_officiate_election(user, election)
 
   categories = None
   eligibility_category_id = None
@@ -1142,7 +1419,7 @@ def voters_list_pretty(request, election):
                           'categories': categories,
                           'eligibility_category_id' : eligibility_category_id})
 
-@election_admin()
+@election_admin(perm_needed='change_election')
 def voters_eligibility(request, election):
   """
   set eligibility for voters
@@ -1178,8 +1455,8 @@ def voters_eligibility(request, election):
   election.save()
   return HttpResponseRedirect(reverse(voters_list_pretty, args=[election.uuid]))
   
-@election_admin()
-def voters_upload(request, election):
+@election_admin(perm_needed='upload_voterfile')
+def voters_upload(request, election, **kw):
   """
   Upload a CSV of password-based voters with
   voter_id, email, name
@@ -1196,10 +1473,17 @@ def voters_upload(request, election):
     
   if request.method == "POST":
     if bool(request.POST.get('confirm_p', 0)):
-      # launch the background task to parse that file
-      tasks.voter_file_process.delay(voter_file_id = request.session['voter_file_id'])
+      
+      
+      try:
+          v_policy = ValidationPolicy.get_by_election_and_perm(election, perm_codename=kw['perm_needed'])
+          tasks.voter_file_process.delay(request=request, voter_file_id = request.session['voter_file_id'], v_policy = v_policy)
+      except:
+          # launch the background task to parse that file
+          tasks.voter_file_process.delay(request=request, voter_file_id = request.session['voter_file_id'])
+      
       del request.session['voter_file_id']
-
+      messages.info(request, "Entries in the voter file which might cause duplicates voter registration were automatically removed.")
       return HttpResponseRedirect(reverse(voters_list_pretty, args=[election.uuid]))
     else:
       # we need to confirm
@@ -1231,6 +1515,7 @@ def voters_upload_cancel(request, election):
 
 @election_admin(frozen=True)
 def voters_email(request, election):
+  
   if not helios.VOTERS_EMAIL:
     return HttpResponseRedirect(reverse(one_election_view, args=[election.uuid]))
   TEMPLATES = [
@@ -1304,9 +1589,10 @@ def voters_email(request, election):
         # include only those who have not voted
         if email_form.cleaned_data['send_to'] == 'not-voted':
           voter_constraints_include = {'vote_hash': None}
-
+          
+        print "Hiasas"
         tasks.voters_email.delay(election_id = election.id, subject_template = subject_template, body_template = body_template, extra_vars = extra_vars, voter_constraints_include = voter_constraints_include, voter_constraints_exclude = voter_constraints_exclude)
-
+        print "Hi"
       # this batch process is all async, so we can return a nice note
       return HttpResponseRedirect(reverse(one_election_view, args=[election.uuid]))
     
@@ -1382,5 +1668,655 @@ def ballot_list(request, election):
   return [v.last_cast_vote().ld_object.short.toDict(complete=True) for v in voters]
 
 
+#added views for election administration features
+
+#home view of the admin page
+@election_view()
+def one_election_admin(request, election):    
+    return render_template(request, 'admin/election_admin', {'election':election})
+
+#page listing all officers of an election
+@election_view()
+def one_election_officers_list(request, election):
+    """
+    this list all election officers of the given election
+    """
+    #url of referer view
+    referer_view = get_referer_view(request)
+    #url of a certain view
+    view_url = reverse(one_election_view,args=[election.uuid])
+
+    if referer_view == view_url:
+        unassigned_roles = ElectionRole.get_unassigned_roles_by_election(election)
+    
+        messages.info(request, "The following roles has not been assigned to any election officer yet:")
+        
+        for role in unassigned_roles:
+            messages.error(request, role)
+            
+    officers = ElectionOfficer.objects.filter(election=election)
+    
+    return render_template(request, 'admin/officers_list', {
+        'election':election, 'officers':officers})
+
+#page for creating/adding new election officer
+#@election_view(perm_needed='add_electionofficer')
+@election_admin(frozen=False, perm_needed='add_electionofficer')
+def user_new(request, election, **kw):
+    
+    error = None
+                
+    if request.method == "GET":
+        officer_form = forms.OfficerForm(election=election)
+    else:
+        officer_form = forms.OfficerForm(request.POST, election=election)
+        
+        if officer_form.is_valid():
+            perm = kw.pop('perm_needed', 'add_electionofficer')
+            
+            
+            user_params = dict(officer_form.cleaned_data)
+            
+            #process officer for User object
+            
+            #create random password for officer
+            password = helios_utils.random_string(length=10)
+            
+            info = {'email':user_params['email'], 'password':password}
+            
+            #create and save user info to database
+            user = User.update_or_create(user_type='password', user_id=user_params['user_id'], 
+                            name=user_params['name'] , info=info)
+            
+            #create ElectionOfficer object and save to database
+            officer = officer_form.save(commit=False)
+            officer.election = election
+            officer.user = user
+            officer.save()
+            
+            #save values of the role many to many field
+            officer_form.save_m2m()
+            
+            #if super_p field is True for user, add Election Admin role to user roles
+            if officer.super_p:
+                officer.electionrole.add(ElectionRole.get_or_create_election_admin_role(election))
+            
+            default_subject = render_template_raw(None, 'email/officer_subject.txt', {})
+            
+            election_url = settings.URL_HOST + reverse(one_election_officers_list, args=[election.uuid])
+            
+            default_body = render_template_raw(None, 'email/officer_body.txt', {
+                'election' : election,
+                'election_url' : election_url,
+                'user': officer.user
+            })
+                
+            tasks.election_notify_an_officer.delay(officer, election.id, default_subject, default_body)
+            
+            messages.success(request, "%s was successfully added to the election officers of this election." % (officer.user.name))
+            return HttpResponseRedirect(reverse(one_election_officers_list, args=[election.uuid]))
+    
+    return render_template(request, 'admin/user_new', {
+        'election':election, 'officer_form':officer_form,
+        'error':error})
+
+#@election_view(perm_needed='change_electionofficer')
+@election_admin(frozen=False, perm_needed='change_electionofficer')
+def user_edit(request, election, officer_id, **kw):
+    
+    error = None
+
+    officer = ElectionOfficer.objects.filter(id=officer_id)
+    
+    if not officer:
+        raise Http404
+    
+    officer = officer[0]
+    
+    if request.method == "GET":
+        user = User.objects.filter(id=officer.user.id)[0]
+        officer_form = forms.OfficerEditForm(election=election, 
+                            initial={'user_id':user.user_id, 'name':user.name,
+                                     'email':user.info['email']}, instance=officer)
+        #officer_form.fields['user_id'] = user.user_id
+        #officer_form.fields['name'] = user.name
+        #officer_form.fields['email'] = user.info['email']
+    else:
+        officer_form = forms.OfficerEditForm(request.POST, instance=officer, election=election)
+        
+        if officer_form.is_valid():
+            user_params = dict(officer_form.cleaned_data)
+            
+            #process officer for User object
+            
+            #create random password for officer
+            password = helios_utils.random_string(length=10)
+            
+            info = {'email':user_params['email'], 'password':password}
+            
+            
+            #create and save user info to database
+            user = User.update_or_create(user_type='password', user_id=user_params['user_id'], 
+                            name=user_params['name'] , info=info)
+            
+            #create ElectionOfficer object and save to database
+            officer = officer_form.save(commit=False)
+            officer.election = election
+            officer.user = user
+            officer.save()
+            #save values of the role many to many field
+            officer_form.save_m2m()
+            
+            if officer.super_p:
+                officer.electionrole.add(ElectionRole.get_or_create_election_admin_role(election))
+            #election_officer = ElectionOfficer.objects.create(user=user, election=election, 
+            #                        super_p = user_params['super_p'])
+            
+            messages.success(request, "Election Officer %s details was successfully updated." % (officer))
+            return HttpResponseRedirect(reverse(one_election_officers_list, args=[election.uuid]))
+    
+    return render_template(request, 'admin/user_edit', {
+        'election':election, 'officer_form':officer_form,
+        'error':error})
+    
+@election_admin(frozen=False, perm_needed='delete_electionofficer')
+def user_delete(request, election, officer_id, **kw):
+    
+    #check for conditions before delete
+    #but for now, allow deletion
+    officer = ElectionOfficer.objects.filter(election=election, id=officer_id)
+    
+    if officer:
+        v_policies = ValidationPolicy.get_by_election_and_officer(election, officer[0], delete=True)
+        if v_policies:
+            messages.error(request, "Officer %s cannot be deleted. Officer is needed on the following validation policies:" %(officer[0].user.name))
+            for v in v_policies:
+                messages.error(request, v.description)
+                
+        else:
+            admins = ElectionOfficer.objects.filter(election=election, super_p=True).exclude(id=officer[0].id)
+            if not admins:
+                messages.error(request, "Officer %s is the lone Election Administrator of this election." % officer[0].user.name)
+            else:
+                officer[0].delete()
+                messages.success(request, "Officer %s was successfully deleted from this election." % (officer[0].user.name))
+        
+    return HttpResponseRedirect(reverse(one_election_officers_list, args=[election.uuid]))
+    
+#page for creating election roles
+@election_view()
+def one_election_roles_list(request, election, **kw):
+    #url of referer view
+    referer_view = get_referer_view(request)
+    #url of a certain view
+    view_url = reverse(one_election_view,args=[election.uuid])
+
+    if referer_view == view_url:
+        unassigned_perms = Permission.get_unassigned_permissions_by_election(election)
+        messages.info(request, "The following permissions has not been assigned to any role yet.")
+        for perm in unassigned_perms:
+            messages.error(request, perm)
+    election_roles = ElectionRole.objects.filter(election=election).exclude(name=helios.ELECTION_ADMIN_ROLE)
+    
+    
+    return render_template(request, 'admin/roles_list',{
+                            'election':election, 'e_roles':election_roles})
+@election_admin(frozen=False, perm_needed='add_electionrole')
+def role_new(request, election, **kw):
+    
+    error = None
+    
+    if request.method == "GET":
+        role_form = forms.RoleForm()
+    else:
+        role_form = forms.RoleForm(request.POST)
+        if role_form.is_valid():
+            #since election field was not included in the form, we have to manually set its value here
+            role = role_form.save(commit=False)
+            role.election = election
+            role.save()
+            
+            #save the values of the many-to-many field permissions
+            role_form.save_m2m()
+            
+            #role_params = dict(role_form.cleaned_data)
+            #ElectionRole.objects.create(name=role_params['name'], election=election)
+            messages.success(request, "Role %s was successfully added." % (role))
+            
+            return HttpResponseRedirect(reverse(one_election_roles_list, args=[election.uuid]))
+    
+    return render_template(request, 'admin/role_new', {
+                            'election':election, 'role_form':role_form})
+
+@election_admin(frozen=False, perm_needed='change_electionrole')
+def role_edit(request, election, role_id, **kw):
+    
+    role = ElectionRole.objects.filter(id=role_id)[0]
+    #do some check here
+    if not role:
+        raise Http404
+    
+    if request.method == "GET":
+        #get instance of the election role, using role_id
+        role = ElectionRole.objects.get(id=role_id)
+        role_form = forms.RoleForm(instance=role)
+    else:
+        role_form = forms.RoleForm(request.POST, instance=role)
+        if role_form.is_valid():
+            #since election field was not included in the form, we have to manually set its value here
+            role = role_form.save(commit=False)
+            role.election = election
+            role.save()
+            
+            #save the values of the many-to-many field permissions
+            role_form.save_m2m()
+            
+            #role_params = dict(role_form.cleaned_data)
+            #ElectionRole.objects.create(name=role_params['name'], election=election)
+            messages.success(request, "Role %s was successfully updated." % (role))
+            return HttpResponseRedirect(reverse(one_election_roles_list, args=[election.uuid]))
+        
+    return render_template(request, 'admin/role_edit', {
+                            'election':election, 'role_form':role_form})
+
+@election_admin(frozen=False, perm_needed='delete_electionrole')
+def role_delete(request, election, role_id, **kw):
+    
+    #check for conditions before delete
+    #but for now, allow deletion
+    role = ElectionRole.objects.filter(election=election, id=role_id)
+    
+    if role:
+        #get all validation policies where role is used
+        v_policies = ValidationPolicy.get_by_election_and_role(election, election_role=role[0])
+        if v_policies:
+            messages.error(request, "Role %s cannot be deleted. It used on the following validation policies:" %(role[0]))
+            for v in v_policies:
+                messages.error(request, v.description)
+                
+        else:    
+            role[0].delete()
+            messages.success(request, "Role %s was successfully deleted." % (role[0]))
+    return HttpResponseRedirect(reverse(one_election_roles_list, args=[election.uuid]))
+    
+@election_view()
+def one_validations_list(request, election, **kw):
+
+    perms = Permission.objects.all().exclude(codename__in=settings.ELECTION_ADMIN_PERMS)
+    for perm in perms:
+        #a separate validation policy can be defined for per permission per election
+        perm_policies = perm.validationpolicy_set.filter(election=election, status=ValidationPolicy.ACTIVE)
+        if perm_policies:
+            setattr(perm, 'policy', perm_policies[0])
+            
+    return render_template(request, 'admin/validations_list', {
+                            'election':election, 'perms':perms})
+
+@election_admin(frozen=False, perm_needed='add_policy')
+def policy_new(request, election, perm_id, **kw):
+    error = None
+    
+    if not perm_id:
+        raise Http404()
+    
+    EntryFormSet = modelformset_factory(ValidationEntry, form=forms.PolicyEntryForm, formset=forms.BaseEntryFormSet, can_delete=True)
+    EntryFormSet.form = staticmethod(curry(forms.PolicyEntryForm, election=election))
+    
+    perm = Permission.objects.get(id=perm_id)
+    policy = ValidationPolicy(permission=perm)
+        
+    if request.method == "GET":    
+        policy_form = forms.PolicyForm(initial= {'description':ValidationPolicy.DESCRIPTION[perm.codename]}, 
+                                       perm_id=perm_id, instance=policy)            
+        formset = EntryFormSet(prefix='pentries', queryset=ValidationEntry.objects.none())
+    elif 'add' in request.POST:
+        policy_form = forms.PolicyForm(request.POST)
+        cp = request.POST.copy()
+        cp['pentries-TOTAL_FORMS'] = int(cp['pentries-TOTAL_FORMS']) + 1
+        formset = EntryFormSet(cp, prefix='pentries')
+    else:
+        policy_form = forms.PolicyForm(request.POST)
+        formset = EntryFormSet(request.POST, prefix='pentries')
+        
+        if policy_form.is_valid() and formset.is_valid():     
+            instances = formset.save(commit=False)
+            if instances:
+                policy = policy_form.save(commit=False)
+                policy.election = election
+                policy.save()
+                            
+                for instance in instances:
+                    instance.validation_policy = policy
+                    instance.save()
+                
+            messages.success(request, "validation policy, %s was successfully added for permission %s" % (policy, policy.permission))    
+            return HttpResponseRedirect(reverse(one_validations_list, args=[election.uuid]))
+    return render_template(request, 'admin/policy_new', {
+                            'election':election, 'policy_form':policy_form,
+                            'formset':formset, 'error':error})
+
+@election_view()
+def policy_details(request, election, val_id, **kw):
+    
+    policy = ValidationPolicy.objects.filter(id=val_id, status='active')[0]
+    entries = policy.validationentry_set.all().order_by('order')
+    
+    return render_template(request, 'admin/policy_details', {
+                            'election':election, 'policy':policy,
+                            'entries':entries})
+
+@election_admin(frozen=False, perm_needed='change_policy')
+def policy_edit(request, election, val_id, **kw):
+    error = None
+    policy = ValidationPolicy.objects.filter(id=val_id, status='active')[0]
+    EntryFormSet = modelformset_factory(ValidationEntry, form=forms.PolicyEntryForm, can_delete=True, formset=forms.BaseEntryFormSet)
+    EntryFormSet.form = staticmethod(curry(forms.PolicyEntryForm, election=election))
+    
+    if not policy:
+        raise Http404()
+    
+    if request.method == "GET":    
+        policy_form = forms.PolicyForm(perm_id=policy.permission.id, instance=policy)
+        formset = EntryFormSet(prefix='pentries', queryset=ValidationEntry.objects.filter(validation_policy=policy).order_by('order'))        
+    elif 'add' in request.POST:
+        policy_form = forms.PolicyForm(request.POST)
+        cp = request.POST.copy()
+        cp['pentries-TOTAL_FORMS'] = int(cp['pentries-TOTAL_FORMS']) + 1
+        formset = EntryFormSet(cp, prefix='pentries')
+    else:
+        
+        policy_form = forms.PolicyForm(request.POST, instance=policy)
+        formset = EntryFormSet(request.POST, prefix='pentries')
+        
+        if policy_form.is_valid() and formset.is_valid():
+            
+            all_instances = []
+            for form in formset.forms:
+#an error happens at form.cleaned_data
+                if form.is_valid():
+                    instance = form.cleaned_data
+                    if instance:
+                        if not instance['DELETE']:
+                            all_instances.append(instance)
+            
+            if all_instances:
+                #create a new validation policy instead
+                policy = policy_form.save(commit=False)
+                p = ValidationPolicy.create(policy_old=policy, v_entries=all_instances)
+                
+                messages.success(request, "validation policy, %s was successfully updated." % (p))
+                return HttpResponseRedirect(reverse(one_validations_list, args=[election.uuid]))
+            
+    return render_template(request, 'admin/policy_edit', {
+                            'election':election, 'policy_form':policy_form,
+                            'formset':formset, 'error':error})
+
+@election_admin(frozen=False, perm_needed='delete_policy')
+def policy_delete(request, election, val_id, **kw):
+    policy = ValidationPolicy.objects.filter(id=val_id)
+    #print policy
+    if policy:
+        #don't delete it, just override it. 
+        policy[0].override()
+        messages.success(request, "The validation policy was successfuly deactivated.")
+        
+    return HttpResponseRedirect(reverse(one_validations_list, args=[election.uuid]))
+
+@election_view()
+def requests_list(request, election, **kw):
+    all_v_requests = ValidationRequest.get_active_requests_by_election(election)
+    voter_v_requests = ValidationRequest.get_active_voter_requests_by_election(election)
+    other_v_requests = ValidationRequest.get_active_other_requests_by_election(election)
+    return render_template(request, 'admin/requests', {
+                                    'election' : election, 'no_active_voter_requests':len(voter_v_requests),
+                                    'no_active_other_requests':len(other_v_requests),  
+                                    'no_active_ballot_requests':len(all_v_requests) - len(voter_v_requests)-len(other_v_requests)})
+  
+@election_view()
+def requests_ballot(request, election, **kw):
+    
+    #ballot preview url
+    
+    try:
+        ballot_requests = ValidationRequest.objects.filter(election_uuid=election.uuid,modeltype=helios.ELECTION, action=Election.DEFINE_BALLOT).order_by('-terminated_at')
+        for r in ballot_requests:
+            r.set_user(get_user(request), request)
+    except ObjectDoesNotExist:
+        ballot_requests = None
+        #return HttpResponseRedirect(reverse(requests_list, args=[election.uuid]))
+        
+    return render_template(request, 'admin/requests_ballot', {
+                                    'election' : election, 'ballot_requests':ballot_requests})
+
+@election_view()
+def ballot_req_details(request, election, vr_id, **kw):
+    #ballot preview url
+    p_url = None
+    try:
+        #get the ballot definition validation request being currently processed
+        v_request = ValidationRequest.objects.get(id=vr_id, modeltype=helios.ELECTION)
+        v_request.set_user(get_user(request), request)
+        v_history = v_request.validationentrymonitor_set.all().order_by('validation_entry__order')
+        p_url = "%s/booth/vote.html?%s" % (settings.SECURE_URL_HOST, urllib.urlencode({'election_url' : reverse(one_election, args=[election.uuid, 'ballot_request', v_request.id])}))
+    except ObjectDoesNotExist:
+        v_request = None
+        v_history = None
+        #return HttpResponseRedirect(reverse(requests_list, args=[election.uuid]))
+        
+    return render_template(request, 'admin/ballot_req_details', {
+                                    'election' : election, 'v_request': v_request,
+                                    'v_history': v_history, 'p_url': p_url})
+@election_view()
+def requests_voters(request, election, **kw):
+    
+    registrants_vr = ValidationRequest.objects.filter(election_uuid = election.uuid, modeltype=helios.VOTER).order_by('-terminated_at')
+    
+    for r in registrants_vr:
+        r.set_user(get_user(request), request)
+    #if not registrants_vr:
+    #    messages.error(request, "NO NEW voter registration has been uploaded yet!")
+    #    return HttpResponseRedirect(get_referer_view(request))
+        
+    return render_template(request, 'admin/requests_voters', {
+                                    'election' : election, 'registrants':registrants_vr})
+
+@election_view()
+def voter_req_details(request, election, vr_id, **kw):
+    try:
+        v_request = ValidationRequest.objects.get(id=vr_id, modeltype=helios.VOTER)
+        v_request.set_user(get_user(request), request)
+        v_history = v_request.validationentrymonitor_set.all().order_by('validation_entry__order')
+        
+    except:
+        v_request = None
+        v_history = None
+        messages.error(request, "Validation Request does not exist!")
+        
+    return render_template(request, 'admin/voter_request_details', {
+                                    'election' : election, 'v_request':v_request,
+                                    'v_history':v_history})
+@election_view()
+def request_details(request, election, vr_id, **kw):
+    try:
+        v_request = ValidationRequest.objects.get(id=vr_id, modeltype=helios.ELECTION)
+        v_request.set_user(get_user(request), request)
+        v_history = v_request.validationentrymonitor_set.all().order_by('validation_entry__order')
+    except:
+        v_request = None
+        v_history = None
+        messages.error(request, "Validation Request does not exist!")
+    return render_template(request, 'admin/request_details', {
+                                    'election' : election, 'v_request':v_request,
+                                    'v_history':v_history})
+    
+@election_view()
+def requests_trustees(request, election, **kw):
+    return render_template(request, 'admin/requests_trustee', {
+                                    'election' : election })
+
+@election_view()
+def other_requests(request, election, **kw):
+    
+    proc_requests = list(ValidationRequest.objects.filter(object_uuid=election.uuid).exclude(action=Election.DEFINE_BALLOT).order_by('-terminated_at'))
+    
+    for r in proc_requests:
+        r.set_user(get_user(request), request)
+    return render_template(request, 'admin/other_requests', {
+                                    'election':election, 'proc_requests':proc_requests})
+@election_view()
+def approve_request(request, election, vr_id, **kw):
+    prompt = None
+    try:
+        v_request = ValidationRequest.objects.get(id=vr_id)
+        e_officer = get_officer(get_user(request), election)
+        print "hi approve ako"
+        
+        if e_officer.approve(v_request, request):
+            #FIXME:
+            #code for committing the action on the validation request
+            #need to do this in a more clean manner
+            # need to check the difference in semantics of valid and satisfied!
+            
+            if v_request.satisfied:
+                commit_request(election, v_request, request)
+            else:
+                messages.success(request, "Your decision on the validation request has been recorded successfully.")
+        
+        #return HttpResponseRedirect(reverse(requests_list, args=[election.uuid]))
+        return HttpResponseRedirect(get_referer_view(request))
+        
+    except ObjectDoesNotExist:
+        raise Http404("The validation request does not exist in the records.")
+
+def commit_request(election, v_request, request=None):
+    obj = None
+    if v_request.satisfied:
+        if v_request.action == Election.DEFINE_BALLOT and v_request.modeltype==helios.ELECTION:
+            data = v_request.data
+            model_type = v_request.modeltype
+            election_type = ContentType.objects.get(model=model_type)
+            #election_class = election_type.model_class()
+            obj = election_type.get_object_for_this_type(uuid=data['old_obj']['uuid'])
+            for attr in data['input']:
+                if hasattr(obj, attr):
+                    setattr(obj, attr, data['input'][attr]) 
+            obj.save()
+            v_request.data['output'] = obj.toJSONDict(update=True)
+            v_request.save()
+            v_request.commit()
+            messages.success(request, "Ballot design has been successfully committed.")
+        elif v_request.action == Voter.ADD and v_request.modeltype == helios.VOTER:
+            obj = Voter.create_from_vrequest(v_request)
+            v_request.data['output'] = obj.toJSONDict(update=True)
+            v_request.save()
+            v_request.commit()
+            messages.success(request, "%s has been added to the official list of voters!" % (obj.voter_name))
+        elif v_request.action == Voter.DELETE and v_request.modeltype == helios.VOTER:
+            data = v_request.data
+            model_type = v_request.modeltype
+            voter_type = ContentType.objects.get(model=model_type)
+            obj = voter_type.get_object_for_this_type(uuid=data['old_obj']['uuid'])
+            messages.success(request, "%s has now been removed from the official list of voters." % (obj.voter_name))
+            obj.delete()
+            v_request.data['output'] = {}
+            v_request.save()
+            v_request.commit()
+        elif v_request.action == Election.OPEN and v_request.modeltype == helios.ELECTION:
+            data = v_request.data
+            model_type = v_request.modeltype
+            election_type = ContentType.objects.get(model=model_type)
+            obj = election_type.get_object_for_this_type(uuid=data['old_obj']['uuid'])
+            for attr in data['input']:
+                if hasattr(obj, attr):
+                    setattr(obj, attr, data['input'][attr])
+            obj.freeze() 
+            v_request.commit()
+            obj.frozen_at = v_request.committed_at
+            obj.save()
+            v_request.data['output'] = obj.toJSONDict(update=True)
+            v_request.save()
+            messages.success(request, "Voting is now officially open!")
+        elif v_request.action == Election.RELEASE and v_request.modeltype == helios.ELECTION:
+            data = v_request.data
+            model_type = v_request.modeltype
+            election_type = ContentType.objects.get(model=model_type)
+            obj = election_type.get_object_for_this_type(uuid=data['old_obj']['uuid'])
+            for attr in data['input']:
+                if hasattr(obj, attr):
+                    setattr(obj, attr, data['input'][attr])
+            obj.combine_decryptions()
+            obj.save()
+            v_request.data['output'] = obj.toJSONDict(update=True)
+            v_request.save()
+            v_request.commit()
+            messages.success(request, "The results of the election is now officially released!")
+        elif v_request.action == Election.CLOSE and v_request.modeltype == helios.ELECTION:
+            data = v_request.data
+            model_type = v_request.modeltype
+            election_type = ContentType.objects.get(model=model_type)
+            obj = election_type.get_object_for_this_type(uuid=data['old_obj']['uuid'])
+            for attr in data['input']:
+                if hasattr(obj, attr):
+                    setattr(obj, attr, data['input'][attr])
+            obj.tallying_started_at = datetime.datetime.utcnow()
+            obj.save()
+            tasks.election_compute_tally.delay(election_id = obj.id)
+            v_request.data['output'] = obj.toJSONDict(update=True)
+            v_request.save()
+            v_request.commit()
+            messages.success(request, "Tallying of the votes has begun!")
+        return obj
+
+@election_view()
+def reject_request(request, election, vr_id, **kw):
+    prompt = None
+    try:
+        v_request = ValidationRequest.objects.get(id=vr_id)
+        e_officer = get_officer(get_user(request), election)
+        
+        #election officer reject request
+        if e_officer.reject(v_request, request):
+            messages.success(request, "Your decision on the validation request has been recorded successfully.")
+        
+        return HttpResponseRedirect(get_referer_view(request))
+        
+    except ObjectDoesNotExist:
+        raise Http404("The validation request does not exist in the records.")
+
+@election_view()
+def ignore_request(request, election, vr_id, **kw):
+    prompt = None
+    try:
+        v_request = ValidationRequest.objects.get(id=vr_id)
+        e_officer = get_officer(get_user(request), election)
+        
+        #election officer abstain request
+        if e_officer.ignore(v_request, request):
+            messages.success(request, "Your decision on the validation request has been recorded successfully.")
+            
+        return HttpResponseRedirect(get_referer_view(request))
+        
+    except ObjectDoesNotExist:
+        raise Http404("The validation request does not exist in the records.")
+
+@election_view()
+@json
+def verify_object_by_uuid(request, election, uuid):
+    validity = None
+    #must be an election object uuid
+    if election.uuid == uuid:
+        validity = election.check_validity_on_vrequests()
+    else:
+        voter = Voter.get_by_election_and_uuid(election, uuid)
+        validity = voter.check_validity_on_vrequests()
+        
+    return {'validity': validity}
+
+@election_view()
+@json
+def election_questions(request, election, **kw):
+    return utils.hash_b64(utils.to_json(election.questions))
 
 
+
+    

@@ -1,0 +1,41 @@
+{% extends TEMPLATE_BASE%}
+
+{% block title %}{{election.name}}{% endblock %}
+{% block content %}
+<h2 class="title">{{election.name}} &mdash; Election Administration <span style="font-size:0.7em;">[<a href="{% url helios.views.one_election_view election.uuid %}">back to election</a>]</span></h2>
+
+<div id="breadcrumb">
+	administration | 
+	validation policy | 
+	details | 
+	[<a href="{% url helios.views.one_validations_list election.uuid %}">cancel</a>]
+</div>
+
+{% include "info-messages.html" %}
+<div id="admin_content">
+	<span id="options">
+		<a href="{% url helios.views.policy_edit election.uuid, policy.id %}"> edit policy</a>
+	</span>	
+<div id="policy">
+	<fieldset style="padding: 10px 10px 10px 10px; margin: 20px 20px 20px 20px">
+		<legend>Validation Policy Details for Permission &lt;{{policy.permission}}&gt;</legend>
+		<span style="font-size: 1.2em"> Description: {{policy.description}}</span>
+		<br /> <br />
+		<span style="font-size: 1.2em;"> The following are the validation steps that will be performed when a <br />
+			request to the permission defined in this policy is executed. Note that <br /> 
+			<b>only when all</b> of the following validation steps is satisfied that such <br /> 
+			a request will executed and its results committed.</span>
+		<br /> <br />
+		<p style="font-size: 1.1em">
+		{% for entry in entries%}
+		<b>STEP {{forloop.counter}}</b> : {{entry.description}}, can be performed by election officers 
+		who belong to role <b>{{entry.election_role}}</b>, and <b>requires {{entry.needed_signatures}} approval</b> 
+		to be satisfied and considered valid. <br /> <br/>  
+		{% endfor %}
+		</p> 
+			
+	</fieldset>
+	
+</div>
+</div>
+{% endblock %}

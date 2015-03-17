@@ -1,0 +1,17 @@
+{% if messages %}
+<div class="message-box round">
+	<span>MESSAGE</span>
+	<ul>
+	{% for message in messages%}
+		<li {% if message.tags %} class="{{ message.tags }}" {%endif%}>
+			{{message}}
+			{%if "pending_request" in message.tags%}
+			Click <a href="{% url helios.views.other_requests election.uuid%}">here</a> for more details.
+			{%else%}{%if "pending_ballot" in message.tags%}
+			Click <a href="{% url helios.views.requests_ballot election.uuid%}">here</a> for more details.
+			{%endif%}{%endif%}
+		</li>
+	{% endfor%}
+	</ul>
+</div>
+{% endif %}

@@ -10,6 +10,13 @@ from django.db import models, transaction
 from django.utils import simplejson
 from django.conf import settings
 from django.core.mail import send_mail
+from django.core.exceptions import ObjectDoesNotExist, PermissionDenied
+
+#added by John Ultra
+from django.conf import settings
+from django.utils.translation import ugettext_lazy as _
+from django.http import *
+import messages
 
 import datetime, logging, uuid, random, StringIO
 
@@ -17,24 +24,79 @@ from crypto import electionalgs, algs, utils
 from helios import utils as heliosutils
 import helios.views
 
-from helios import datatypes
-
+from helios import datatypes 
 
 # useful stuff in auth
-from auth.models import User, AUTH_SYSTEMS
-from auth.jsonfield import JSONField
+from helios_auth.models import User, AUTH_SYSTEMS, Permission
+from helios_auth.jsonfield import JSONField
 from helios.datatypes.djangofield import LDObjectField
 
 import csv, copy
+
   
 class HeliosModel(models.Model, datatypes.LDObjectContainer):
   class Meta:
     abstract = True
 
-class Election(HeliosModel):
-  admin = models.ForeignKey(User)
+  #enumerate the field names of a model
+  @classmethod
+  def field_names(cls):
+    fields = cls._meta.fields + cls._meta.many_to_many
+    field_names = []
+    
+    for field in fields:
+        field_names.append(field.name)
+    return field_names  
   
-  uuid = models.CharField(max_length=50, null=False)
+  def check_validity_on_vrequests(self):
+      
+      if isinstance(self, Election):
+          election = self
+    
+      if hasattr(self, 'election'):
+          election = self.election
+            
+      v_requests = ValidationRequest.get_by_object_uuid_and_election(object_uuid=self.uuid, election=election)
+      #convert to list
+      vr_list = list(v_requests)
+      cleaned_vr_list = []
+      for r in vr_list:
+          if r.satisfied:
+              #consider only satisfied validation request 
+              cleaned_vr_list.append(r)
+      
+      cur_obj = self.toJSONDict(update=True)
+      length = len(cleaned_vr_list)
+      
+      #firstly, check if the 'output' of the latest validation request 
+      #is THE SAME as the current state of the object
+      if len(cleaned_vr_list) > 1: 
+          if not cur_obj == cleaned_vr_list[length-1].data['output']:
+              return False
+      
+      #traverse the cleaned vr list, checking if the 'output' of a validation request 
+      #is THE SAME as 'old_obj' of the validation request succeeding it.  
+      for i in xrange(length-1):
+          if not cleaned_vr_list[i].data['output'] == cleaned_vr_list[i+1].data['old_obj']:
+              return False
+      
+      return True
+  
+class Election(HeliosModel):
+
+  OPEN = 'open election'
+  CLOSE = 'close election and start tallying votes'
+  RELEASE = 'release results'
+  DEFINE_BALLOT = 'define ballot'
+  
+  #election creator
+  admin = models.ForeignKey(User, related_name='elections')
+  
+  #other election administrators and officers  
+  election_officers = models.ManyToManyField(User, through='ElectionOfficer')
+  
+  
+  uuid = models.CharField(max_length=50, null=False, unique=True)
 
   # keep track of the type and version of election, which will help dispatch to the right
   # code, both for crypto and serialization
@@ -187,7 +249,18 @@ class Election(HeliosModel):
       return query[:limit]
     else:
       return query
-    
+
+  #added by John Utra
+  #gets all elections where a user is an officer, not necessarily an admin
+  
+  @classmethod
+  def get_by_user_as_officer(cls, user, archived_p=None, limit=None):
+      query = cls.objects.filter(election_officers=user)
+      query = query.order_by('-created_at')
+      if not query:
+          return None
+      return query
+  
   @classmethod
   def get_by_user_as_voter(cls, user, archived_p=None, limit=None):
     query = cls.objects.filter(voter__user = user)
@@ -305,6 +378,21 @@ class Election(HeliosModel):
   @property
   def issues_before_freeze(self):
     issues = []
+    
+    unassigned_perms = Permission.get_unassigned_permissions_by_election(self) 
+    if unassigned_perms:
+        issues.append(
+            {'type':'permission',
+             'action': 'assign permissions to election roles'
+             }
+            )
+    unassigned_roles = ElectionRole.get_unassigned_roles_by_election(self)
+    if unassigned_roles:
+        issues.append(
+            {'type':'election role',
+             'action': 'assign election roles to election officers'
+             }
+            )
     if self.questions == None or len(self.questions) == 0:
       issues.append(
         {'type': 'questions',
@@ -381,8 +469,8 @@ class Election(HeliosModel):
     look up the list of voters, make a big file, and hash it
     """
 
-    # FIXME: for now we don't generate this voters hash:
-    return
+    ## FIXME: for now we don't generate this voters hash:
+    #return
 
     if self.openreg:
       self.voters_hash = None
@@ -437,7 +525,9 @@ class Election(HeliosModel):
       auth_systems = [vt for vt in voter_types if vt in auth_systems]
 
     self.eligibility = [{'auth_system': auth_system} for auth_system in auth_systems]
-    self.save()    
+    
+    #bewate in calling self.save
+    #self.save()    
     
   def freeze(self):
     """
@@ -464,7 +554,8 @@ class Election(HeliosModel):
     # log it
     self.append_log(ElectionLog.FROZEN)
 
-    self.save()
+    #remove by John
+    #self.save()
 
   def generate_trustee(self, params):
     """
@@ -594,7 +685,9 @@ class Election(HeliosModel):
       prettified_result.append({'question': q['short_name'], 'answers': pretty_question})
 
     return prettified_result
+  
     
+  
 class ElectionLog(models.Model):
   """
   a log of events for an election
@@ -603,10 +696,14 @@ class ElectionLog(models.Model):
   FROZEN = "frozen"
   VOTER_FILE_ADDED = "voter file added"
   DECRYPTIONS_COMBINED = "decryptions combined"
-
+  
+  VOTER_ADDED = "voter added"
+  VOTER_DELETED = "voter deleted"
+  
   election = models.ForeignKey(Election)
   log = models.CharField(max_length=500)
   at = models.DateTimeField(auto_now_add=True)
+  #who = models.ForeignKey(ElectionOfficer) 
 
 ##
 ## UTF8 craziness for CSV
@@ -669,7 +766,7 @@ class VoterFile(models.Model):
         return_dict['name'] = voter_fields[2]
 
       yield return_dict
-    
+     
   def process(self):
     self.processing_started_at = datetime.datetime.utcnow()
     self.save()
@@ -732,9 +829,86 @@ class VoterFile(models.Model):
 
     return num_voters
 
+  def registrants(self):
+    #self.processing_started_at = datetime.datetime.utcnow()
+    #self.save()
 
+    election = self.election
+
+    # now we're looking straight at the content
+    if self.voter_file_content:
+      voter_stream = StringIO.StringIO(self.voter_file_content)
+    else:
+      voter_stream = open(self.voter_file.path, "rU")
+
+    reader = unicode_csv_reader(voter_stream)
+
+    last_alias_num = election.last_alias_num
+
+    num_voters = 0
+    new_voters = []
+    for voter in reader:
+      # bad line
+      if len(voter) < 1:
+        continue
+    
+      num_voters += 1
+      voter_id = voter[0].strip()
+      name = voter_id
+      email = voter_id
+    
+      if len(voter) > 1:
+        email = voter[1].strip()
+    
+      if len(voter) > 2:
+        name = voter[2].strip()
+    
+      # create the user -- NO MORE
+      # user = User.update_or_create(user_type='password', user_id=email, info = {'name': name})
+    
+      # does voter for this user already exist
+      voter = Voter.get_by_election_and_voter_id(election, voter_id)
+    
+      # create the voter
+      if not voter:
+        voter_uuid = str(uuid.uuid4())
+        voter = Voter(uuid= voter_uuid, user = None, voter_login_id = voter_id,
+                      voter_name = name, voter_email = email, election = election)
+        new_voters.append(voter)
+        
+        #we just want to list the them....
+        voter.generate_password()
+        #voter.save()
+
+    #what if, election which does not use alias is changed to use one?
+    if election.use_voter_aliases:
+      voter_alias_integers = range(last_alias_num+1, last_alias_num+1+num_voters)
+      random.shuffle(voter_alias_integers)
+      for i, voter in enumerate(new_voters):
+        voter.alias = 'V%s' % voter_alias_integers[i]
+        
+        #voter.save()
+
+    self.num_voters = num_voters
+    
+    #self.processing_finished_at = datetime.datetime.utcnow()
+    #self.save()
+
+    return new_voters
+
+  def start_processing(self):
+    self.processing_started_at = datetime.datetime.utcnow()
+    self.save()
+        
+  def end_processing(self):
+    self.processing_finished_at = datetime.datetime.utcnow()
+    self.save()
     
 class Voter(HeliosModel):
+    
+  DELETE = 'delete voter'
+  ADD = 'add voter'
+  
   election = models.ForeignKey(Election)
   
   # let's link directly to the user now
@@ -744,10 +918,10 @@ class Voter(HeliosModel):
   #voter_id = models.CharField(max_length = 100)
 
   uuid = models.CharField(max_length = 50)
-
+  
   # for users of type password, no user object is created
   # but a dynamic user object is created automatically
-  user = models.ForeignKey('auth.User', null=True)
+  user = models.ForeignKey('helios_auth.User', null=True)
 
   # if user is null, then you need a voter login ID and password
   voter_login_id = models.CharField(max_length = 100, null=True)
@@ -764,6 +938,8 @@ class Voter(HeliosModel):
   vote_hash = models.CharField(max_length = 100, null=True)
   cast_at = models.DateTimeField(auto_now_add=False, null=True)
 
+  
+  
   class Meta:
     unique_together = (('election', 'voter_login_id'))
 
@@ -926,7 +1102,23 @@ class Voter(HeliosModel):
   def last_cast_vote(self):
     return CastVote(vote = self.vote, vote_hash = self.vote_hash, cast_at = self.cast_at, voter=self)
     
-  
+  @classmethod
+  def create_from_vrequest(cls, v_request):
+    election = Election.get_by_uuid(v_request.election_uuid) 
+    data = v_request.data['input']
+    
+    #field_names = cls.field_names()
+    #new_voter = cls()
+    #for attr in data:
+    #    if attr in field_names:
+    #        setattr(new_voter, attr, data[attr])
+    
+    new_voter = cls(uuid=str(data['uuid']), voter_name=str(data['voter_name']), voter_login_id=str(data['voter_login_id']), 
+                        voter_email=str(data['voter_email']), voter_password=str(data['voter_password']),
+                        voter_type=str(data['voter_type']), election=election)
+    new_voter.save()
+    return new_voter
+
 class CastVote(HeliosModel):
   # the reference to the voter provides the voter_uuid
   voter = models.ForeignKey(Voter)
@@ -1003,7 +1195,8 @@ class CastVote(HeliosModel):
       raise Exception("cast vote is quarantined, verification and storage is delayed.")
 
     result = self.vote.verify(self.voter.election)
-
+    print result
+    
     if result:
       self.verified_at = datetime.datetime.utcnow()
     else:
@@ -1126,3 +1319,912 @@ class Trustee(HeliosModel):
     # verify_decryption_proofs(self, decryption_factors, decryption_proofs, public_key, challenge_generator):
     return self.election.encrypted_tally.verify_decryption_proofs(self.decryption_factors, self.decryption_proofs, self.public_key, algs.EG_fiatshamir_challenge_generator)
     
+#added by John Utra
+
+#code taken from Django 1.2.5 helios_auth.models
+class ElectionRole(HeliosModel):
+    """ElectionRole is a way for categorizing permissions to election officers. 
+    """
+    
+    name = models.CharField(_('name'), max_length=80)
+    election = models.ForeignKey(Election)
+    permissions = models.ManyToManyField(Permission, verbose_name=_('permissions'), blank=True)
+
+    class Meta:
+        verbose_name = _('election role')
+        verbose_name_plural = _('election roles')
+        unique_together = ('election', 'name')
+        
+    def __unicode__(self):
+        return self.name
+    
+    @classmethod
+    def get_or_create_election_admin_role(cls, election):
+        name = settings.ELECTION_ADMIN_ROLE
+        
+        #checks first if Election Admin role already exists, and return it
+        election_admin_role = ElectionRole.objects.filter(name=name, election=election)
+        if election_admin_role:
+            return election_admin_role[0]
+        
+        #proceed into creation of ELECTION ADMIN role
+        default_admin_perms = settings.ELECTION_ADMIN_PERMS
+        
+        permissions = Permission.objects.filter(codename__in=default_admin_perms)
+        
+        election_admin_role = ElectionRole(election=election, name=name)
+        election_admin_role.save()
+        for perm in permissions:
+            election_admin_role.permissions.add(perm)
+        
+        return election_admin_role
+    
+    @classmethod
+    def get_officers_per_roles(cls, role_ids):
+        officers_per_role = {}
+        
+        for id in role_ids:
+            try:
+                role = cls.objects.get(id=id)
+                officers_per_role[id] = role.electionofficer_set.all()          
+            except:    
+                continue
+        return officers_per_role
+    
+    @classmethod
+    def get_unassigned_roles_by_election(cls, election):
+        all_election_roles = cls.objects.filter(election=election)
+        unassigned_roles = []
+        for role in all_election_roles:
+            if not role.electionofficer_set.all():
+                unassigned_roles.append(role)
+        return unassigned_roles
+    
+class ElectionOfficer(HeliosModel):
+    user =  models.ForeignKey(User)
+    
+    election = models.ForeignKey(Election)
+    
+    #is an Election Administrator or Super Administrator
+    super_p = models.BooleanField(default=False)
+    
+    electionrole = models.ManyToManyField(ElectionRole, verbose_name=_('election roles'), blank=True)
+    
+    #user_permissions = models.ManyToManyField(Permission, verbose_name=_('user permissions'), blank=True)
+    
+    class Meta:
+        unique_together = ('user', 'election')
+    @property
+    def permissions(self):
+        roles = self.electionrole.all()
+        perms = None
+        for role in roles:
+            role_p = role.permissions.all()
+            if role_p and not perms:
+                perms = []
+                for p in role_p:
+                    perms.append(str(p.codename))
+            else:
+                for p in role_p:
+                    perms.append(str(p.codename))
+        return perms
+    
+    @property
+    def roles(self):
+        #return the QuerySet
+        return self.electionrole.all()
+
+    def approve(self, v_request, request):
+        return self.vote(v_request, request, decision='approved')
+        
+        
+    def reject(self, v_request, request):
+        return self.vote(v_request, request, decision='rejected')
+        
+    def ignore(self, v_request, request):
+        return self.vote(v_request, request, decision='abstained')
+        
+    def vote(self, v_request, request, decision='abstained'):
+        """
+        conditions:
+        
+        1. check if election officer possess the right role, of the currently active validation entry
+        2. check if the election officer, has not previously participated in validating another validation entry
+            under the same validation request a.k.a enforcing separation of concern.
+        """
+        active_vm = v_request.active_vm
+         
+        if active_vm:
+            
+            ve_role = active_vm.validation_entry.election_role
+            if ve_role in self.roles:
+                if not self.has_prior_participation(v_request, request):
+                    # add approval of election officer, and save to database
+                    active_vm.validators.append([self.user.user_id, unicode(datetime.datetime.utcnow()), decision,'somesignature'])
+                    active_vm.save()
+                    v_request.do_checks()
+                    if not v_request.satisfiable:
+                        messages.error(request, "This validation request can no longer be SATISFIED/VALID so it was TERMINATED.")
+                    return True
+                else:
+                    messages.error(request, "It's either you were the one who filed this validation request, so can you no longer participate for its approval,") 
+                    messages.error(request, "Or you have already participated in deciding this request!")
+                    return False
+            else:
+                messages.error(request, "You are not allowed to participate in deciding this validation request!")
+                return False
+        #else: validation entry or the whole policy is already terminated
+        messages.error(request, "This validation request has already been decided.")
+        return False
+    
+    def has_prior_participation(self, v_request, request):
+        #assume this is user public key
+        user_id = self.user.user_id
+        
+        #maybe officer is the requesting officer
+        if user_id == v_request.user_id:
+            #messages.error(request, "You created this request. So you can't participate in its approval!")
+            return True
+        
+        #committed_vm = v_request.committed_vm
+        for vm in v_request.validationentrymonitor_set.all():
+            if user_id in vm.validator_ids:
+                #messages.error(request, "You have already participated in deciding this request!")
+                return True
+        
+        return False
+    
+    @classmethod
+    def get_by_permission_and_election(cls, permission, election):
+        return cls.objects.filter(electionrole__permissions__codename=permission.codename, election=election).distinct()
+
+    def __unicode__(self):
+        return self.user.name
+    
+    @classmethod
+    def get_by_election_id(cls, election_id):
+        return cls.objects.filter(election__id = election_id)
+        
+    @classmethod
+    def get_by_election_and_user(cls, election, user):
+        return cls.objects.get(election=election, user=user)
+    
+from helios.graph_utils.BipartiteMatching import matching as bi_matching
+
+class ValidationPolicy(models.Model):
+    
+    ACTIVE = 'active'
+    
+    DESCRIPTION = {
+        'upload_voterfile': 'Validation policy for uploading new voter registration',
+        'define_ballot': 'Validation policy for defining the election ballot',
+        'open_election':'Validation policy for opening the election',
+        'close_election': 'Validation policy for closing the election',
+        'delete_voter': 'Validation policy for removing a voter',
+        'can_release_election_results':'Validation policy for releasing election results'
+        }
+    
+    description = models.CharField(max_length=500)
+    permission = models.ForeignKey(Permission)
+    election = models.ForeignKey(Election)
+    status = models.CharField(max_length=50, default='active')
+    
+    @classmethod
+    def create(cls, policy_old, v_entries):
+        policy_new = cls()
+        policy_new.description = policy_old.description
+        policy_new.permission = policy_old.permission
+        policy_new.election = policy_old.election
+        #take old's policy status which is presumably ACTIVE
+        policy_new.status = policy_old.status
+        #save as new policy
+        policy_new.save()
+        #override the old one, deactivate sort of. 
+        policy_old.override()
+        
+        for entry_old in v_entries:
+            entry_new = ValidationEntry()
+            entry_new.description = entry_old['description']
+            entry_new.validation_policy = policy_new
+            entry_new.election_role = entry_old['election_role']
+            entry_new.needed_signatures = entry_old['needed_signatures']
+            entry_new.order = entry_old['order']
+            entry_new.save()
+            
+        return policy_new
+    
+    #used in evaluating a persistent validation policy
+    def is_satisfiable(self, officers_to_delete=[], delete_from_roles=[]):
+        role_ids = []
+        v_entries = self.validationentry_set.all()
+        
+        for entry in v_entries:
+            if entry.election_role.id not in role_ids:
+                role_ids.append(entry.election_role.id)
+                
+        #returnds a dictionary {'role_id':[officer_objects_list], ...}
+        officers_per_role = ElectionRole.get_officers_per_roles(role_ids)
+        
+        delete_from_role_ids = [role.id for role in delete_from_roles]
+        
+        for role in officers_per_role:
+            officer_ids = []
+            for officer in officers_per_role[role]:
+                if delete_from_roles:
+                    #if this method is called from the edit officer view,
+                    #then this code simulates the deletion of the officer 
+                    #from each of the roles defined in delete_from_roles
+                    if role in delete_from_role_ids:
+                        if officer not in officers_to_delete:
+                            officer_ids.append(officer.id)
+                    else:
+                        officer_ids.append(officer.id)
+                else:
+                    #if this method is called from the delete officer view,
+                    #then this code simulates the deletion of the officer being removed
+                    #officer is deleted from each of the roles where he is a member
+                    if officer not in officers_to_delete:
+                        officer_ids.append(officer.id)
+            officers_per_role[role] = officer_ids
+        
+        #get the users who can execute the permission associated to this policy
+        #include them in the matching
+        #officers_of_perm = ElectionOfficer.get_by_permission_and_election(permission=self.permission, election=self.election).distinct()
+        
+        perm_officer_ids = []
+        roles_of_perm = self.permission.electionrole_set.filter(election=self.election)
+        role_ids_of_perm = [role.id for role in roles_of_perm]
+        officers_per_role_of_perm = ElectionRole.get_officers_per_roles(role_ids_of_perm)
+        for role in officers_per_role_of_perm:
+            for officer in officers_per_role_of_perm[role]:
+                if officer.id not in perm_officer_ids:
+                    if delete_from_roles:
+                        if role in delete_from_role_ids:
+                            if officer not in officers_to_delete:
+                                perm_officer_ids.append(officer.id)
+                        else:
+                            perm_officer_ids.append(officer.id)
+                    else:
+                        if officer not in officers_to_delete: 
+                            perm_officer_ids.append(officer.id)     
+                                    
+        ve_user_mapping ={}
+        ve_user_mapping['perm'] = perm_officer_ids
+        
+        for i, ve in enumerate(v_entries):
+            for j in range(ve.needed_signatures):
+                if ve.election_role.id in officers_per_role:
+                    ve_user_mapping['ve'+str((i+1)+((j+1)*.1))] = officers_per_role[ve.election_role.id]
+        
+        
+        
+        M, A, B = bi_matching(ve_user_mapping)
+        
+        M2 = {}
+        
+        for u in M:
+            M2[M[u]] = u
+            
+        errors = []
+        for i, ve in enumerate(v_entries):
+            errors.append([ve.needed_signatures, 0])
+            for v in M2:
+                if v.startswith("ve"+str(i+1)):
+                    errors[i][1] += 1
+        
+        if 'perm' not in M2:
+            errors.append(['perm', 0])
+        
+        if len(M) == len(ve_user_mapping):
+            return [True, None]
+        
+        return [False, errors]
+    
+    
+    #used to validate a validation policy raw data from a form
+    @classmethod
+    def validate(cls, v_entries, permission_id, election):
+        
+        
+        role_ids = []
+        for entry in v_entries:
+            if entry['election_role'] not in role_ids:
+                role_ids.append(entry['election_role'].id)
+        
+        officers_per_role = ElectionRole.get_officers_per_roles(role_ids)
+        
+        for role in officers_per_role:
+            officer_ids = []
+            for officer in officers_per_role[role]:
+                officer_ids.append(officer.id)
+            officers_per_role[role] = officer_ids
+        
+        permission = Permission.objects.get(id=permission_id)
+        officers_of_perm = ElectionOfficer.get_by_permission_and_election(permission=permission, election=election)
+        perm_officer_ids = []
+        
+        for officer in officers_of_perm:
+            if officer.id not in perm_officer_ids:
+                perm_officer_ids.append(officer.id)
+        
+        ve_user_mapping ={}
+        
+        for i, ve in enumerate(v_entries):
+            for j in range(ve['needed_signatures']):
+                if ve['election_role'].id in officers_per_role:
+                    ve_user_mapping['ve'+str((i+1)+((j+1)*.1))] = officers_per_role[ve['election_role'].id]
+                
+        ve_user_mapping['perm'] = perm_officer_ids
+                
+        M, A, B = bi_matching(ve_user_mapping)
+        
+        M2 = {}
+        
+        for u in M:
+            M2[M[u]] = u
+            
+        errors = []
+        for i, ve in enumerate(v_entries):
+            errors.append([ve['needed_signatures'], 0])
+            for v in M2:
+                if v.startswith("ve"+str(i+1)):
+                    errors[i][1] += 1
+        if 'perm' not in M2:
+            errors.append(['perm', 0])
+        
+        if len(M) == len(ve_user_mapping):
+            return [True, None]
+        
+        return [False, errors]
+    
+    def __unicode__(self):
+        return self.description
+    
+    def override(self):
+        self.status = 'over-ridden'
+        self.save()
+    
+    
+    @property
+    def election_roles(self):
+        roles =[]
+        validation_entries = self.validationentry_set.all()
+        for v in validation_entries:
+            roles.append(v.role.name)
+        return roles
+    
+    @classmethod
+    def get_by_election_and_perm(cls, election, perm_codename):
+        try:
+            policy = cls.objects.get(election=election, permission__codename=perm_codename, status='active')
+        except:
+            raise ObjectDoesNotExist("Validation Policy matching query does not exist.")
+        return policy
+    
+    @classmethod
+    def get_by_election_and_role(cls, election, election_role):
+        return cls.objects.filter(validationentry__election_role=election_role, election=election)
+    
+    @classmethod
+    def get_by_election_and_officer(cls, election, officer, delete_from_roles=[], delete=False):
+        #officer_roles = officer.electionrole.all()
+        #officer_role_ids = [role.id for role in officer_roles]
+        
+        #officer_policies = cls.objects.filter(validationentry__election_role__in=officer_roles, election=election)
+        officer_policies = cls.objects.filter( election=election, status='active') 
+        
+        if delete:
+            officers_to_delete=[officer]
+            
+        affected_policies = []
+        
+        if officer_policies:
+            for p in officer_policies:
+                if not p.is_satisfiable(officers_to_delete, delete_from_roles)[0]:
+                    affected_policies.append(p)
+                    
+        return affected_policies
+    
+class ValidationEntry(models.Model):
+    description = models.CharField(max_length=100)
+    validation_policy = models.ForeignKey(ValidationPolicy)
+    election_role = models.ForeignKey(ElectionRole)
+    needed_signatures = models.PositiveIntegerField()
+    order = models.PositiveIntegerField()
+
+    def __unicode__(self):
+        return self.description
+    
+class ValidationRequest(HeliosModel):
+    
+    #the uuid of the object, this will be its default uuid value when it's actually committed
+    object_uuid = models.CharField(max_length=50, null=False)
+    
+    #election refs uuid field
+    election_uuid = models.CharField(max_length=50, null=False)
+    
+    #the id of the election officer
+    election_officer = models.ForeignKey(ElectionOfficer)
+    
+    #user_id of election officer, for convenience?
+    user_id = models.CharField(max_length=50, null=False)
+    
+    #date time this request was created
+    requested_at = models.DateTimeField(auto_now_add=True)
+    
+    #date time this request's action was committed
+    committed_at = models.DateTimeField(auto_now_add=False, default=None, null=True)
+    
+    #date time this request was terminated, either since it was satisfied or ended prematurely
+    terminated_at = models.DateTimeField(auto_now_add=False, default=None, null=True)
+    
+    #data type of object, based on __init__.py file
+    modeltype = models.CharField(max_length=20, null=False)
+    
+    #dictionary representation of data of object
+    data = LDObjectField(null=True, type_hint='legacy/Data')
+    
+    #action to be executed on the object of type datatype instantiated with data
+    action = models.CharField(null=False, max_length=50)
+    
+    #hash of these request
+    digest = models.CharField(null=False, max_length=50)
+    
+    #validation policy, assuming that it does not get changed. 
+    #validation_policy = models.CharField(null=False, max_length=200)
+    validation_policy = models.ForeignKey(ValidationPolicy, null=True)
+    
+    # start the validation process
+    def start(self):
+        if self.validation_policy:
+            vp = self.validation_policy
+            
+            #start creation of ValidationEntry monitors from the 'back'
+            ves = vp.validationentry_set.all().order_by('order')
+            
+            for ve in ves:
+                vm =  ValidationEntryMonitor()
+                vm.validation_entry = ve
+                vm.validation_request = self
+                vm.save()
+                
+            vm1 = self.validationentrymonitor_set.all().order_by('validation_entry__order')[0]
+            vm1.start()
+        else:
+            #if there is no validation policy, just terminate it.
+            self.terminate()
+    # restart the validation process, called when a validation request is modified
+    def reset(self):
+        if self.validation_policy:
+            #delete previous monitors
+            prev_monitors = self.validationentrymonitor_set.all()
+            for mon in prev_monitors:
+                mon.delete()
+                
+            self.start()
+    
+    def terminate(self):
+        self.terminated_at = datetime.datetime.utcnow()
+        self.save() 
+    
+    def commit(self):
+        self.terminate()
+        self.committed_at = datetime.datetime.utcnow()
+        self.save()
+    #@property
+    #def active(self):
+    #    if self.active_vm:
+    #        return True
+    #    return False
+    
+    
+    @property
+    def terminated(self):
+        return self.terminated_at != None
+        """
+        if not self.validation_policy:
+            return True
+        else:
+            vms = self.validationentrymonitor_set.all()
+            for vm in vms:
+                if vm.active:
+                    return False
+            return True
+        """
+    @property
+    def status(self):
+        if self.terminated and self.satisfied:
+            return u'Terminated-Valid'
+        if self.terminated:
+            return u'Terminated-Invalid'
+        return u'Active-Invalid'
+    
+    @property
+    def active_vm(self):
+        vms = self.validationentrymonitor_set.all()
+        for vm in vms:
+            if vm.active:
+                return vm
+        return None
+    
+    @property
+    def committed_vm(self):
+        return self.validationentrymonitor_set.filter(start_time__isnull=False, end_time__isnull=False)
+    
+    @property
+    def satisfied(self):
+        #initially, test if a validation policy is defined, and
+        #if there is none, the request is satisfied by default
+        if not self.validation_policy:
+            return True
+        
+        committed_vm = self.committed_vm
+        
+        if self.validationentrymonitor_set.all().count() == committed_vm.count():
+            for vm in committed_vm:
+                if not vm.satisfied:
+                    return False
+        else:
+            return False
+        
+        return True
+    
+    @property
+    def valid(self):
+        return self.satisfied
+    
+    @property
+    def satisfiable(self):
+        U_d_user_ids = []
+        
+        U_d_user_ids.append(self.user_id)
+        v_entries_monitor = self.validationentrymonitor_set.all().order_by('validation_entry__order')
+        for vemonitor in v_entries_monitor:
+            if vemonitor.terminated or vemonitor.active:
+                for validator in vemonitor.validators:
+                    U_d_user_ids.append(validator[0])
+        
+        v_policy = self.validation_policy
+        v_entries = v_policy.validationentry_set.all().order_by('order')
+        
+        if len(v_entries) != len(v_entries_monitor):
+            raise Exception("v_entries and v_entries_monitor are not of the same length. this should not have happened.")
+        
+        role_ids = []
+        for ve_monitor in v_entries_monitor:
+            if not ve_monitor.valid:
+                role_id = ve_monitor.validation_entry.election_role.id 
+                if role_id not in role_ids:
+                    role_ids.append(role_id)
+        
+        officers_per_role = ElectionRole.get_officers_per_roles(role_ids)
+        
+        for role in officers_per_role:
+            officer_ids = []
+            for officer in officers_per_role[role]:
+                if officer.user.user_id not in U_d_user_ids:
+                    officer_ids.append(officer.id)
+            officers_per_role[role] = officer_ids
+        
+        ve_user_mapping = {}
+        for i, ve_monitor in enumerate(v_entries_monitor):
+            still_needed_signatures = ve_monitor.validation_entry.needed_signatures - len(ve_monitor.approved_by)
+            for j in range(still_needed_signatures):
+                ve_role_id = ve_monitor.validation_entry.election_role.id
+                if ve_role_id in officers_per_role:
+                    ve_user_mapping['ve'+str((i+1)+((j+1)*.1))] = officers_per_role[ve_role_id]
+        
+        M, A, B = bi_matching(ve_user_mapping)            
+        
+        if len(M) == len(ve_user_mapping):
+            return True
+        else:
+            return False
+    
+    def do_checks(self):
+        if self.active_vm:
+            if self.active_vm.satisfied:
+                if not self.to_next_vm():
+                    self.terminate()
+            else:
+                if not self.satisfiable:
+                    self.active_vm.terminate()
+                    self.terminate()
+        else:
+            self.terminate()
+    #proceed to next validation entry to be processed
+    def to_next_vm(self):
+        
+        if self.active_vm.satisfied:
+            self.active_vm.terminate()
+            
+            vms = self.validationentrymonitor_set.filter(start_time__isnull=True, end_time__isnull=True).order_by('validation_entry__order')
+        
+            #if there are still vms
+            if vms:
+                vms[0].start()
+                return True    
+        #if all vms were satisfied already
+        return None
+    
+    @classmethod
+    def create(cls, user, election, req_data=None):
+        if req_data == None:
+            print "Erro1"
+            return None
+        #get election officer
+        try:
+            election_officer = ElectionOfficer.objects.get(election=election, user=user)
+        except ObjectDoesNotExist:
+            print "User: ", user, " is not authorized for this election = ", election
+            return HttpResponse("Failure")
+        
+        request = cls(object_uuid=req_data['uuid'])    
+        request.election_officer = election_officer
+        request.election_uuid = election.uuid
+        request.user_id = user.user_id
+        request.object_uuid = req_data['uuid']
+        request.modeltype = req_data['modeltype']
+        request.action = req_data['action']
+        #request.data = utils.to_json(req_data['data'])
+        request.data = req_data['data']
+        request.digest = "digest_value"
+        request.validation_policy = req_data['vp']
+        
+        request.save()
+        request.start()
+        
+        return request
+        
+    @classmethod
+    def update_or_create(cls, user, election, req_data=None):
+        
+        
+        if req_data == None:
+            print "Erro1"
+            return None
+        
+        #get election officer
+        try:
+            election_officer = ElectionOfficer.objects.get(election=election, user=user)
+        except ObjectDoesNotExist:
+            print "Error2"
+            return HttpResponse("Failure")
+        
+        try:
+            
+            #get the request object
+            request = cls.objects.get(election_uuid=election.uuid, object_uuid=req_data['uuid'], action=req_data['action'], committed_at__isnull=True, terminated_at__isnull=True)
+            
+            #update election officer
+            request.election_officer = election_officer
+            request.user_id = user.user_id
+            
+            #update requested_at
+            request.requested_at = datetime.datetime.utcnow()
+            
+            #update data
+            #request.data = utils.to_json(req_data['data'])
+            request.data = req_data['data']
+            
+            #update hash
+            request.digest = "digest_value"
+            
+            #update policy
+            request.validation_policy = req_data['vp']
+            request.save()
+            
+            request.reset()
+            
+            
+        except ObjectDoesNotExist:
+            
+            request = cls(object_uuid=req_data['uuid'])    
+            request.election_officer = election_officer
+            request.election_uuid = election.uuid
+            request.user_id = user.user_id
+            request.object_uuid = req_data['uuid']
+            request.modeltype = req_data['modeltype']
+            request.action = req_data['action']
+            #request.data = utils.to_json(req_data['data'])
+            request.data = req_data['data']
+            request.digest = "digest_value"
+            request.validation_policy = req_data['vp']
+            
+            request.save()
+            
+            request.start()
+        
+        return request
+    
+    #gets ballot validation request by election
+    @classmethod
+    def get_ballot_req_by_election(cls, election):
+        try:
+            v_request = cls.objects.get(election_uuid = election.uuid, object_uuid='ballot_uuid', committed_at__isnull=True, terminated_at__isnull=True)
+        except:
+            v_request = None
+        return v_request
+    
+    @classmethod
+    def get_by_object_uuid_and_election(cls, object_uuid, election):
+        return cls.objects.filter(object_uuid=object_uuid, election_uuid=election.uuid).order_by('committed_at')
+    
+    def set_user(self, user, request):
+        if not hasattr(user, 'user_id'):
+            self.user_can_decide = False
+            return
+        
+        election = Election.get_by_uuid(self.election_uuid)
+        
+        #assume this is user public key
+        user_id = user.user_id
+        try:
+            officer = ElectionOfficer.get_by_election_and_user(election, user)
+        except:
+            officer = None
+            print "Hi"
+            
+        self.user_can_decide = False
+        
+        if officer:
+            #check if there is still an active validatiom monitor, else request has terminated already
+            if self.active_vm:
+                active_role = self.active_vm.validation_entry.election_role
+                if active_role in officer.roles:
+                    if not officer.has_prior_participation(self, request=request):
+                        self.user_can_decide = True
+                    
+        
+    @property
+    def user_can_participate(self):
+        print self.user_can_decide
+        return self.user_can_decide
+    
+    @staticmethod
+    def get_active_requests_by_election(election):
+        return ValidationRequest.objects.filter(election_uuid=election.uuid,  terminated_at__isnull=True)
+    
+    @staticmethod
+    def get_active_voter_requests_by_election(election):
+        return ValidationRequest.objects.filter(election_uuid=election.uuid,  terminated_at__isnull=True, modeltype=helios.VOTER)
+    
+    @staticmethod
+    def get_active_other_requests_by_election(election):
+        return ValidationRequest.objects.filter(election_uuid=election.uuid,  terminated_at__isnull=True, modeltype=helios.ELECTION).exclude(action=Election.DEFINE_BALLOT)
+    
+    @staticmethod
+    def voter_v_request_exists_by_election(election, voter_name, voter_email):
+        voter_requests = ValidationRequest.objects.filter(election_uuid=election.uuid, committed_at__isnull=True, terminated_at__isnull=True, action=Voter.ADD, modeltype=helios.VOTER)
+        for voter_request in voter_requests:
+            voter_data = voter_request.data['input']
+            if voter_data['voter_email'] == voter_email and voter_data['voter_name'] == voter_name:
+                return True
+        return False
+    
+class ValidationEntryMonitor(models.Model):
+    
+    REJECTED = "rejected"
+    APPROVED = "approved"
+    ABSTAINED = "abstained"
+    
+    validation_entry = models.ForeignKey(ValidationEntry)
+    validation_request = models.ForeignKey(ValidationRequest)
+    start_time = models.DateTimeField(auto_now_add=False, default=None, null=True)
+    end_time = models.DateTimeField(auto_now_add=False, default=None, null=True)
+    validators = LDObjectField(type_hint='legacy/Data', null=True, default='[]')
+    
+    # start processing a validation entry
+    def start(self):
+        if not self.start_time:
+            self.start_time = datetime.datetime.utcnow()
+            self.end_time = None
+            self.save()
+        else:
+            print "Error! Monitor already started!"
+    
+    #reset the processing of validation entry
+    def reset(self):
+        if self.start_time:
+            self.start_time = None
+            self.end_time = None
+            self.validators = '[]'
+            self.save()
+        else:
+            print "Error! Monitor has not yet started!"
+    
+    #end this validation monitor, assumingly it is done
+    def terminate(self):
+        if self.active:
+            #defensive programming here, just checking you know!
+            if self.satisfied:
+                self.end_time = datetime.datetime.utcnow()
+                self.save()
+            else:
+                if not self.validation_request.satisfiable:
+                    self.end_time = datetime.datetime.utcnow()
+                    self.save()
+                else:
+                    raise PermissionDenied("Validation Entry is not yet satisfied, you are not allowed to end it!")
+        else:
+            raise PermissionDenied("Validation Entry is not yet being processed, ending it does not make sense!")
+    
+    @property
+    def inactive(self):
+        return not (self.start_time and self.end_time)     
+    @property
+    def active(self):
+        return self.start_time and not self.end_time
+    
+    @property
+    def terminated(self):
+        return self.start_time and self.end_time
+    
+    @property
+    def satisfied(self):
+        needed_signatures = self.validation_entry.needed_signatures
+        approved = [validator for validator in self.validators if validator[2] == ValidationEntryMonitor.APPROVED]
+        return len(approved) == needed_signatures
+        
+    @property
+    def valid(self):
+        return self.terminated and self.satisfied
+    
+    @property
+    def status(self):
+        if self.terminated:
+            if self.valid:
+                return u'Terminated-Valid'
+            else:
+                return u'Terminated-Invalid'
+        else:
+            if self.active:
+                return u'Active-Invalid'
+            else:
+                return u'Inactive-Invalid'
+        
+    @property
+    def validator_ids(self):
+        user_ids = []
+        for val in self.validators:
+            user_ids.append(val[0])
+        return user_ids
+    
+    @property
+    def approved_by(self):
+        names = []
+        for val in self.validators:
+            user_id = val[0]
+            decision = val[2]
+            if decision == ValidationEntryMonitor.APPROVED:
+                user = User.objects.get(user_id=user_id)
+                names.append(user.name)
+        return names
+    
+    @property
+    def rejected_by(self):
+        names = []
+        for val in self.validators:
+            user_id = val[0]
+            decision = val[2]
+            if decision == ValidationEntryMonitor.REJECTED:
+                user = User.objects.get(user_id=user_id)
+                names.append(user.name)
+        return names
+    
+    @property
+    def abstention(self):
+        names = []
+        for val in self.validators:
+            user_id = val[0]
+            decision = val[2]
+            if decision == ValidationEntryMonitor.ABSTAINED:
+                user = User.objects.get(user_id=user_id)
+                names.append(user.name)
+        return names
+    
+#update an object using the data on a validation request            
+def update_from_vrequest(v_request):
+    pass
+
+

@@ -1,0 +1,24 @@
+{% extends TEMPLATE_BASE%}
+
+{% block title %}{{election.name}}{% endblock %}
+{% block content %}
+<h2 class="title">{{election.name}} &mdash; Election Administration <span style="font-size:0.7em;">[<a href="{% url helios.views.one_election_view election.uuid %}">back to election</a>]</span></h2>
+
+<div id="breadcrumb">
+	administration | 
+	election officers | 
+	edit officer | 
+	[<a href="{% url helios.views.one_election_officers_list election.uuid %}">cancel</a>]
+</div>
+<div id="admin_content">
+	<form action="" method="post" id="edit_officer_form">
+		<table class="john_form">
+			{{officer_form.as_table}}
+		</table>
+		<div>
+			<br />
+			<label for="">&nbsp;</label><input type="submit" value="Update" id="edit_officer" />
+		</div>
+	</form>
+</div>
+{% endblock %}

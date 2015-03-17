@@ -18,7 +18,7 @@ body {
 }
 
 #contentbody {
-  padding: 20px 30px 20px 30px;
+  padding: 0px 30px 20px 30px;
 }
 
 #header {
@@ -112,4 +112,101 @@ table.pretty th, td {
 
 .adminaction a {
     color: black;
+}
+
+/*added by John Ultra */
+
+#admin_menu {
+	float:left;
+ 	width: 200px;
+ 	border-right: 1px solid #888;
+ 	margin: 30px 0px 30px 0px;
+}
+
+#admin_content {
+	
+  	top: 0px;
+  	margin-top: 30px;
+  	width: 1050px;
+  	background: white;
+  	border: 1px solid #666;
+}
+
+#breadcrumb {
+	font-size:1.0em;
+}
+
+table.list {
+	margin: 0.5em 0.5em 0.5em 0.5em;
+    background: whitesmoke;
+    border-collapse: collapse;
+    width: 1000px;
+}
+
+table.list th, td {
+    border: 1px silver solid;
+    padding: 0.3em;
+    vertical-align: top;
+}
+
+#options {
+	margin: 0.0em 0.0em 0.0em 0.5em;
+	font-size: 1.5em; 
+	background: lightyellow; 
+	border: 1px solid #888;
+ 	padding: 5px 5px 5px 5px;
+}
+
+.message-box {
+	
+	background: lightyellow;
+	padding: 10px;
+	color: black;
+	border: 1px solid #888;
+}
+
+li.info {
+	color: blue;
+	font-size: large;
+}
+
+li.success {
+	color: green;
+	font-size: large;
+}
+
+li.error {
+	color: red;
+	font-size: large;
+}
+
+.Active-Invalid {
+	color: orange;
+}
+
+.Terminated-Valid {
+	color: green;
+}
+
+.Inactive-Invalid {
+	color: black;
+}
+
+#user-info {
+  bottom: 0px;
+  background: #ddd;
+  width: 1060px;
+  padding: 8px 20px 8px 20px;
+  text-align: left;
+  color: #666;
+  clear: both;
+}
+
+#user-info a, #user-info a:visited {
+  color: black;
+  text-decoration: none;
+}
+
+#user-info a:hover {
+  text-decoration: underline;
 }

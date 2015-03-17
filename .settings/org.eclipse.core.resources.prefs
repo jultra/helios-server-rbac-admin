@@ -1,0 +1,8 @@
+eclipse.preferences.version=1
+encoding//helios/migrations/0005_add_quarantine_fields.py=utf-8
+encoding//helios/migrations/0006_auto__chg_field_voter_vote__add_unique_voter_voter_login_id_election__.py=utf-8
+encoding//helios/models.py=utf-8
+encoding//helios/urls.py=utf-8
+encoding//helios/views.py=utf-8
+encoding//server_ui/urls.py=utf-8
+encoding/urls.py=utf-8

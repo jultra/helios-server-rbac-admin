@@ -82,11 +82,27 @@ window.onbeforeunload = function(evt) {
 };
 
 BOOTH.exit = function() {
-    if (confirm("Are you sure you want to exit the booth and lose all information about your current ballot?")) {
-        BOOTH.started_p = false;
-        window.location = BOOTH.election.cast_url;
+    
+    if (BOOTH.election.frozen_at){
+    	if (confirm("Are you sure you want to exit the booth and lose all information about your current ballot?")) {
+        	BOOTH.started_p = false;
+        	window.location = BOOTH.election.cast_url;
+        }
+    }
+    else{
+    	if (confirm("Are you sure you want to exit previewing the ballot booth?")){
+    		BOOTH.started_p = false;
+    		window.location = BOOTH.election.questions_url;	
+    	}
     }
 };
+
+BOOTH.exit_preview = function(){
+	if (confirm("This ends the preview of the election of the ballot booth. If this was the real election, clicking the 'Proceed to Cast' button will take you to a page where you can submit and cast you vote. Thank you!")){
+		BOOTH.started_p = false;
+		window.location = BOOTH.election.questions_url;
+	}
+}
 
 BOOTH.setup_ballot = function(election) {
   BOOTH.ballot = {};
@@ -399,7 +415,7 @@ BOOTH.show_confirm = function() {
     // process the answers
     var choices = BALLOT.pretty_choices(BOOTH.election, BOOTH.ballot);
 
-    BOOTH.show($('#confirm_div')).processTemplate({'questions' : BOOTH.election.questions, 'choices' : choices});
+    BOOTH.show($('#confirm_div')).processTemplate({'questions' : BOOTH.election.questions, 'choices' : choices, 'election_frozen' : BOOTH.election.frozen_at, 'questions_url' : BOOTH.election.questions_url});
 };
 
 BOOTH.check_encryption_status = function() {

@@ -32,10 +32,13 @@ To protect your privacy:
 </ul>
 </p>
 
-<button id="proceed_button" onclick="BOOTH.cast_ballot();">Proceed to Cast</button><br />
-<div id="loading_div"></div>
-
-
+{#if BOOTH.election.frozen_at}
+	<button id="proceed_button" onclick="BOOTH.cast_ballot();">Proceed to Cast</button><br />
+	<div id="loading_div"></div>	
+{#else}
+	<button id="proceed_button" onclick="BOOTH.exit_preview();">Proceed to Cast</button><br />
+	<div id="loading_div"></div>
+{#/if}
 
 <form method="POST" action="{$T.cast_url}" id="send_ballot_form" class="prettyform">
 <input type="hidden" name="election_uuid" value="{$T.election_uuid}" />

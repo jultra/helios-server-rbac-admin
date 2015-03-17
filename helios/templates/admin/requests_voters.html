@@ -1,0 +1,51 @@
+{% extends TEMPLATE_BASE%}
+
+{% block title %}{{election.name}}{% endblock %}
+{% block content %}
+<h2 class="title">{{election.name}} &mdash; Election Administration <span style="font-size:0.7em;">[<a href="{% url helios.views.one_election_view election.uuid %}">back to election</a>]</span></h2>
+
+<div id="breadcrumb">
+	administration | 
+	validation requests | 
+	voters | 
+	[<a href="{% url helios.views.requests_list election.uuid %}">cancel</a>]
+</div>
+
+{% include "info-messages.html" %}
+
+<div id="admin_content">
+<!-- list the validation request for the voter registrants-->
+<table class="list" style="text-align: left">
+	<tr><th>Task</th><th>Name</th><th>E-mail</th>
+			<th>Status</th><th colspan="3" style="text-align: center">Action</th></tr>
+		
+			{% for v_request in registrants %}
+			<tr>
+			<td style="color: blue">
+				<b>{{v_request.action|upper}}</b>
+			</td>
+			{% ifequal v_request.action "add voter"%}
+			<td>{{v_request.data.input.voter_name }}</td>
+			<td>{{v_request.data.input.voter_email}}</td>
+			{%else%}
+				<td>{{v_request.data.old_obj.voter_name}}</td>
+				<td>{{v_request.data.old_obj.voter_email}}</td>
+			{%endifequal%}
+			<td>
+				{% if v_request.status == "Terminated-Valid"%}
+					<span style="color: green">{{v_request.status}}</span>
+				{% else %}{%if v_request.status == "Terminated-Invalid"%}
+					<span style="color: red">{{v_request.status}}</span>
+				{% else %}
+					<span style="color: orange">{{v_request.status}}</span>
+				{% endif%}{% endif%}
+				[<a href="{% url helios.views.voter_req_details election.uuid, v_request.id%}">more info</a>]
+			</td>
+			{%include "admin/table_voting_buttons.html"%}
+		</tr>
+		{% empty %}
+			<td colspan="6" style="color: red">There's NO NEW voter registrations uploaded, yet!</td>
+		{% endfor %}
+</table>
+</div>
+{% endblock %}

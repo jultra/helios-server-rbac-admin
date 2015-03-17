@@ -1,0 +1,18 @@
+Dear {{user.name}},
+
+{{custom_message|safe}}
+You have been assigned as an election officer for {{election.name}}.
+
+You can view more information about duties by visiting the link
+for the administration page of the election below. 
+
+Election Admin Page: {{election_url}} 
+
+Use the following credentials.
+
+Your voter ID: {{user.user_id}}
+Your password: {{user.info.password}}
+
+
+--
+Voting

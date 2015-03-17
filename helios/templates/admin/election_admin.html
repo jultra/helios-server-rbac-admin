@@ -1,0 +1,19 @@
+{% extends TEMPLATE_BASE%}
+
+{% block title %}{{election.name}}{% endblock %}
+{% block content %}
+<h2 class="title">{{election.name}} &mdash; Election Administration <span style="font-size:0.7em;">[<a href="{% url helios.views.one_election_view election.uuid %}">back to election</a>]</span></h2>
+
+<div id="breadcrumb">
+	administration
+</div>
+<p align="center" style="font-size: 1.5em;">
+<a href="{% url helios.views.one_election_roles_list election.uuid %}">election roles</a>
+&nbsp;&nbsp;|&nbsp;&nbsp;
+<a href="{% url helios.views.one_election_officers_list election.uuid %}">election officers</a>
+&nbsp;&nbsp;|&nbsp;&nbsp;
+<a href="{% url helios.views.one_validations_list election.uuid %}">validation policies</a>
+&nbsp;&nbsp;|&nbsp;&nbsp;
+<a href="{% url helios.views.requests_list election.uuid %}">validation requests</a>
+</p>
+{% endblock %}

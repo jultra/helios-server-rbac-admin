@@ -1,0 +1,49 @@
+{% extends TEMPLATE_BASE%}
+
+{% block title %}{{election.name}}{% endblock %}
+{% block content %}
+<h2 class="title">{{election.name}} &mdash; Election Administration <span style="font-size:0.7em;">[<a href="{% url helios.views.one_election_view election.uuid %}">back to election</a>]</span></h2>
+
+<div id="breadcrumb">
+	<a href="{% url helios.views.one_election_admin election.uuid %}">administration</a> | 
+	validation policies	
+</div>
+
+<br />
+<span style="font-size: 1.3em;">
+In this page, you can define, change, and remove validation policies <br /> 
+for the different permissions. For a more trustworthy result, it is advised <br />
+that the different election administration activities performed by the <br /> 
+different election officers be reviewed and validated first by other concerned <br /> 
+individuals e.g. party representatives, election administrator, other election officers, <br /> 
+election observers, etc. This approach for preventing fraud and errors is<br />
+known as Separation of Duties (SoD). In this application, you can enforce the <br />
+validation process required in the execution of a permission by defining its validation policy. <br /> 
+In it, you can enumerate the steps of the validation process as validation entries. <br />
+</span>
+
+{% include "info-messages.html"%}
+
+<div id="admin_content">
+<table class="list">
+	<tr>
+		<th>Permissions</th><th>Validation Policy</th>
+	</tr>
+	{% for perm in perms %}
+	<tr>
+		<td>{{perm.name}}</td>
+		<td align="center">
+			{% if perm.policy %}
+				<a href="{% url helios.views.policy_details election.uuid, perm.policy.id %}">{{perm.policy}}</a>
+				[<a style="color:red" href="{% url helios.views.policy_edit election.uuid, perm.policy.id %}">edit</a>]
+				[<a onclick="return confirm('are you sure you want to deactivate validation policy for this permission?');" 
+					style="color:red" href="{% url helios.views.policy_delete election.uuid, perm.policy.id %}">deactivate</a>]
+			{% else %}
+				<a style="color:red" href="{% url helios.views.policy_new election.uuid, perm.id %}"	>add policy</a>
+			{% endif %}
+		</td>
+	</tr>
+	{% endfor %}
+</table>
+</div>
+{% endblock %}
