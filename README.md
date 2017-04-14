@@ -1,7 +1,7 @@
 # helios-server-rbac-admin
-This is a branch of the Helios Web E-voting System (https://vote.heliosvoting.org/) which was originally written by Ben Adida. 
+This is a fork of the Helios Web E-voting System (https://vote.heliosvoting.org/) which was originally written by Ben Adida. 
 
-This branch of Helios has advanced access control functions not present in the original Helios. 
+This version of Helios has advanced access control functions not present in the original Helios. 
 
 In this version of Helios, the various administrative functions in a Helios election can now be delegated to different election authorities. To achieve this, a role-based access control model was implemented in the system. 
 
